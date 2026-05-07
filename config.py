@@ -1,0 +1,20 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+ALLOWED_CHAT_IDS = [int(x) for x in os.environ.get("CHAT_IDS", "").split(",") if x]
+VOCAB_TOPIC = os.environ.get("VOCAB_TOPIC", "vocab")
+
+WINDOW_START_HOUR = 9    # notifications begin at 09:00
+WINDOW_END_HOUR = 23     # notifications end at 23:00
+DAILY_SLOTS = 10
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+
+# Words at or above this mastery score are retired (excluded from selection)
+RETIREMENT_THRESHOLD = 10
+
+# Synthetic elapsed seconds assigned to words never seen before (7 days)
+# Gives unseen words a high initial weight without special-casing them
+NEVER_SEEN_SECONDS = 7 * 24 * 3600
