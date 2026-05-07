@@ -1,0 +1,104 @@
+{
+  "words": [
+    {
+      "id": "tapir",
+      "word": "tapir",
+      "sentence": "The tapir used its short, flexible snout to pluck leaves from low-hanging branches near the river's edge.",
+      "mastery_score": 0,
+      "last_seen": null,
+      "history": []
+    },
+    {
+      "id": "okapi",
+      "word": "okapi",
+      "sentence": "Resembling a horse with zebra-striped legs, the okapi is the giraffe's only living relative and was unknown to science until 1901.",
+      "mastery_score": 1,
+      "last_seen": "2026-05-07T21:34:07.758161",
+      "history": [
+        {
+          "timestamp": "2026-05-07T21:34:07.758161",
+          "result": "known"
+        }
+      ]
+    },
+    {
+      "id": "binturong",
+      "word": "binturong",
+      "sentence": "The binturong hung by its prehensile tail in the canopy, filling the air around it with an inexplicable scent of warm popcorn.",
+      "mastery_score": 0,
+      "last_seen": null,
+      "history": []
+    },
+    {
+      "id": "pangolin",
+      "word": "pangolin",
+      "sentence": "When the pangolin sensed danger, it curled into a tight ball, its overlapping keratin scales forming a near-impenetrable armour.",
+      "mastery_score": 1,
+      "last_seen": "2026-05-07T21:35:40.095964",
+      "history": [
+        {
+          "timestamp": "2026-05-07T21:35:40.095964",
+          "result": "known"
+        }
+      ]
+    },
+    {
+      "id": "capybara",
+      "word": "capybara",
+      "sentence": "The capybara waded into the river with calm authority — at 70 kilograms, it is the world's largest living rodent.",
+      "mastery_score": 0,
+      "last_seen": null,
+      "history": []
+    },
+    {
+      "id": "mandrill",
+      "word": "mandrill",
+      "sentence": "The dominant mandrill's face blazed with ridged blue and scarlet colouring, a signal of rank no other animal in the troop could ignore.",
+      "mastery_score": 1,
+      "last_seen": "2026-05-07T21:36:01.106267",
+      "history": [
+        {
+          "timestamp": "2026-05-07T21:36:01.106267",
+          "result": "known"
+        }
+      ]
+    },
+    {
+      "id": "axolotl",
+      "word": "axolotl",
+      "sentence": "Unlike most salamanders, the axolotl never undergoes metamorphosis — it keeps its feathery external gills and lives its entire life underwater.",
+      "mastery_score": 0,
+      "last_seen": null,
+      "history": []
+    },
+    {
+      "id": "fennec",
+      "word": "fennec",
+      "sentence": "The fennec's oversized ears are not just for hearing — they radiate body heat, keeping the animal cool across the Saharan nights it hunts through.",
+      "mastery_score": 0,
+      "last_seen": null,
+      "history": []
+    },
+    {
+      "id": "fossa",
+      "word": "fossa",
+      "sentence": "The fossa looks like a small cougar, but it is more closely related to the mongoose — Madagascar's largest predator evolved in near-total isolation.",
+      "mastery_score": 0,
+      "last_seen": null,
+      "history": []
+    },
+    {
+      "id": "aardvark",
+      "word": "aardvark",
+      "sentence": "The aardvark sealed its nostrils against the dust and drove its sticky tongue 30 centimetres into the termite mound.",
+      "mastery_score": 0,
+      "last_seen": "2026-05-07T21:34:49.499482",
+      "history": [
+        {
+          "timestamp": "2026-05-07T21:34:49.499482",
+          "result": "forgot"
+        }
+      ]
+    }
+  ]
+}
