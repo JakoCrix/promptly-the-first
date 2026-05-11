@@ -1,10 +1,12 @@
 import logging
+from datetime import datetime
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from config import ALLOWED_CHAT_IDS, BOT_TOKEN
-from scheduler import wire_scheduler
+from persistence import mark_slot_fired
+from scheduler import MELBOURNE_TZ, get_schedule_state, wire_scheduler
 from vocab import pick_word, record_feedback
 
 
@@ -24,6 +26,48 @@ async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=keyboard,
         parse_mode="HTML",
     )
+
+    ts: datetime = context.job.data
+    context.bot_data.setdefault("today_fired", set()).add(ts)
+    try:
+        mark_slot_fired(ts)
+    except Exception:
+        logging.exception("Failed to persist fired slot %s — in-memory state is current", ts)
+
+
+async def start_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_chat.id not in ALLOWED_CHAT_IDS:
+        return
+    await update.message.reply_text(
+        "👋 Welcome to Promptly!\n\n"
+        "I'll send you vocabulary prompts throughout the day — just tap ✅ Known or ❌ Forgot on each one.\n\n"
+        "Commands:\n"
+        "/schedule — see today's prompt times and which have already fired",
+        parse_mode=None,
+    )
+
+
+async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if chat_id not in ALLOWED_CHAT_IDS:
+        return
+
+    today_slots = context.bot_data.get("today_slots")
+    if not today_slots:
+        await update.message.reply_text("No schedule available yet.")
+        return
+
+    fired_times = context.bot_data.get("today_fired", set())
+    schedule = get_schedule_state(today_slots, fired_times)
+
+    lines = []
+    for entry in schedule:
+        t = entry["time"].astimezone(MELBOURNE_TZ)
+        symbol = "⏳" if entry["pending"] else "✅"
+        lines.append(f"{symbol} {t.strftime('%H:%M')}")
+
+    header = f"Today's schedule ({len(schedule)} slots, Melbourne time):"
+    await update.message.reply_text(header + "\n" + "\n".join(lines))
 
 
 async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -53,6 +97,8 @@ def main() -> None:
         .post_init(post_init)
         .build()
     )
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("schedule", schedule_command))
     app.add_handler(
         CallbackQueryHandler(feedback_handler, pattern=r"^(known|forgot):\d+:.+$")
     )
