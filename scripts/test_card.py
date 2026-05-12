@@ -4,8 +4,8 @@ Sends the full card format with ✅ Known / ❌ Forgot inline buttons,
 waits for you to press one, updates the mastery score, then exits.
 
 Usage:
-    python scripts/test_card.py              # random word
-    python scripts/test_card.py pangolin     # specific word by id
+    python scripts/test_card.py              # random word from active topic
+    python scripts/test_card.py pangolin     # specific word by id (active topic)
 """
 import asyncio
 import sys
@@ -18,22 +18,22 @@ from telegram.error import TelegramError
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ContextTypes
 
 from config import ALLOWED_CHAT_IDS, BOT_TOKEN
-from vocab import load_vocab, pick_word, record_feedback
+from vocab import get_active_topic, get_word, pick_word, record_feedback
 
 
 def resolve_word(chat_id: int, word_id: str | None) -> dict | None:
     if word_id:
-        data = load_vocab(chat_id)
-        if data is None:
-            print(f"  ✗ No vocab file found for chat {chat_id}")
+        topic = get_active_topic(chat_id)
+        if topic is None:
+            print(f"  ✗ No active topic set for chat {chat_id} — run /topic in Telegram first")
             return None
-        word = next((w for w in data["words"] if w["id"] == word_id), None)
+        word = get_word(chat_id, topic, word_id)
         if word is None:
-            print(f"  ✗ Word '{word_id}' not found in vocab for chat {chat_id}")
+            print(f"  ✗ Word '{word_id}' not found in topic '{topic}' for chat {chat_id}")
         return word
     word = pick_word(chat_id)
     if word is None:
-        print(f"  ✗ No eligible words for chat {chat_id} (empty or all retired)")
+        print(f"  ✗ No eligible words for chat {chat_id} (no active topic or all retired)")
     return word
 
 
@@ -51,18 +51,24 @@ async def main() -> None:
     async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         await query.answer()
-        result, chat_id_str, wid = query.data.split(":", 2)
-        chat_id = int(chat_id_str)
+        parts = query.data.split(":", 3)
+        if len(parts) != 4:
+            return
+        result, chat_id_str, topic, wid = parts
+        try:
+            chat_id = int(chat_id_str)
+        except ValueError:
+            return
         if chat_id not in ALLOWED_CHAT_IDS:
             return
-        record_feedback(chat_id, wid, result)
+        record_feedback(chat_id, topic, wid, result)
         await query.edit_message_reply_markup(reply_markup=None)
         label = "Known" if result == "known" else "Forgot"
         print(f"  ✓ '{wid}' marked as {label} — mastery updated")
         stop_event.set()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(known|forgot):\d+:.+$"))
+    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(known|forgot):\d+:[^:]+:.+$"))
 
     async with app:
         await app.start()
@@ -78,8 +84,8 @@ async def main() -> None:
                 continue
             text = f"<b>{word['word']}</b>\n\n{word['sentence']}"
             keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['id']}"),
-                InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['id']}"),
+                InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['topic']}:{word['id']}"),
+                InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['topic']}:{word['id']}"),
             ]])
             try:
                 await app.bot.send_message(
