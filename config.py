@@ -11,6 +11,7 @@ WINDOW_START_HOUR = 9    # notifications begin at 09:00
 WINDOW_END_HOUR = 23     # notifications end at 23:00
 DAILY_SLOTS = 10
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+DB_PATH = os.path.join(DATA_DIR, "promptly.db")
 
 # Words at or above this mastery score are retired (excluded from selection)
 RETIREMENT_THRESHOLD = 10

@@ -7,7 +7,7 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 from config import ALLOWED_CHAT_IDS, BOT_TOKEN
 from persistence import mark_slot_fired
 from scheduler import MELBOURNE_TZ, get_schedule_state, wire_scheduler
-from vocab import pick_word, record_feedback
+from vocab import get_active_topic, init_db, list_topics, pick_word, record_feedback, set_active_topic
 
 
 async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -17,8 +17,8 @@ async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     text = f"<b>{word['word']}</b>\n\n{word['sentence']}"
     keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['id']}"),
-        InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['id']}"),
+        InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['topic']}:{word['id']}"),
+        InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['topic']}:{word['id']}"),
     ]])
     await context.bot.send_message(
         chat_id=chat_id,
@@ -42,7 +42,8 @@ async def start_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
         "👋 Welcome to Promptly!\n\n"
         "I'll send you vocabulary prompts throughout the day — just tap ✅ Known or ❌ Forgot on each one.\n\n"
         "Commands:\n"
-        "/schedule — see today's prompt times and which have already fired",
+        "/schedule — see today's prompt times and which have already fired\n"
+        "/topic — see or switch your active vocabulary topic. Type /topic <name> to switch to a different topic.",
         parse_mode=None,
     )
 
@@ -70,25 +71,59 @@ async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await update.message.reply_text(header + "\n" + "\n".join(lines))
 
 
+async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if chat_id not in ALLOWED_CHAT_IDS:
+        return
+
+    available = list_topics(chat_id)
+
+    if not context.args:
+        current = get_active_topic(chat_id) or (available[0] if available else "none")
+        topics_str = ", ".join(available) if available else "none"
+        await update.message.reply_text(
+            f"Active topic: {current}\nAvailable: {topics_str}"
+        )
+        return
+
+    requested = context.args[0]
+    match = next((t for t in available if t.lower() == requested.lower()), None)
+    if match is None:
+        topics_str = ", ".join(available) if available else "none"
+        await update.message.reply_text(
+            f"Topic '{requested}' not found. Available: {topics_str}"
+        )
+        return
+
+    set_active_topic(chat_id, match)
+    await update.message.reply_text(f"Switched to topic: {match}")
+
+
 async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    parts = query.data.split(":", 2)
-    if len(parts) != 3:
+    parts = query.data.split(":", 3)
+    if len(parts) != 4:
         return
-    result, chat_id_str, word_id = parts
+    result, chat_id_str, topic, word_id = parts
     try:
         chat_id = int(chat_id_str)
     except ValueError:
         return
-    if chat_id not in ALLOWED_CHAT_IDS:
+    if chat_id not in ALLOWED_CHAT_IDS or update.effective_chat.id != chat_id:
         return
-    record_feedback(chat_id, word_id, result)
+    record_feedback(chat_id, topic, word_id, result)
     await query.edit_message_reply_markup(reply_markup=None)
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
     async def post_init(app):
+        init_db()
         wire_scheduler(app, send_card)
 
     app = (
@@ -99,12 +134,12 @@ def main() -> None:
     )
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("schedule", schedule_command))
+    app.add_handler(CommandHandler("topic", topic_command))
     app.add_handler(
-        CallbackQueryHandler(feedback_handler, pattern=r"^(known|forgot):\d+:.+$")
+        CallbackQueryHandler(feedback_handler, pattern=r"^(known|forgot):\d+:[^:]+:.+$")
     )
     app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     main()
