@@ -29,6 +29,8 @@ CHAT_IDS=<comma-separated-chat-ids>
 python scripts/test_connection.py          # verify token + chat IDs, sends a test message
 python scripts/test_card.py                # force-send a random card and wait for button press
 python scripts/test_card.py <word_id>      # force-send a specific word (e.g. "pangolin", "ni_hao")
+python scripts/test_suggest.py             # test Gemini suggestions + send first card via Telegram
+python scripts/test_suggest.py <topic>    # same but override the topic (e.g. "zoo_animals")
 python scripts/migrate_to_sqlite.py        # one-shot: import JSON vocab + seed all built-in topics
 python scheduler.py                        # print today's generated slots (quick sanity check)
 ```

@@ -122,6 +122,13 @@ def migrate_vocab_files(conn: sqlite3.Connection) -> tuple[list[str], dict[int, 
     return migrated_paths, first_topic_per_user
 
 
+TOPIC_DESCRIPTIONS = {
+    "zoo_animals": "Common animals found in a zoo, suitable for intermediate English vocabulary.",
+    "chinese":     "Everyday Mandarin Chinese words and phrases, written in pinyin with English translations.",
+    "vegetables":  "Common vegetables, suitable for beginner English vocabulary.",
+}
+
+
 def seed_topics(conn: sqlite3.Connection) -> None:
     """Seed built-in dictionaries for every user in ALLOWED_CHAT_IDS."""
     if not ALLOWED_CHAT_IDS:
@@ -139,6 +146,14 @@ def seed_topics(conn: sqlite3.Connection) -> None:
                 )
         conn.commit()
         print(f"  Seeded '{topic}': {len(words)} words for {len(ALLOWED_CHAT_IDS)} user(s)")
+
+    for topic, description in TOPIC_DESCRIPTIONS.items():
+        conn.execute(
+            "INSERT OR IGNORE INTO topics (topic, description) VALUES (?, ?)",
+            (topic, description),
+        )
+    conn.commit()
+    print(f"  Seeded descriptions for {len(TOPIC_DESCRIPTIONS)} topic(s)")
 
 
 def set_active_topics(first_topic_per_user: dict[int, str]) -> None:
