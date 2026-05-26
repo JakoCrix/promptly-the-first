@@ -14,7 +14,7 @@ from db import (
     reject_from_pool,
     update_word_entry,
 )
-from config import ALLOWED_CHAT_IDS, RETIREMENT_THRESHOLD
+from core.config import ALLOWED_CHAT_IDS, RETIREMENT_THRESHOLD
 
 st.set_page_config(page_title="Promptly Dashboard", layout="wide")
 init_word_pool()

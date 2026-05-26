@@ -6,7 +6,7 @@ import sqlite3
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import DB_PATH, ALLOWED_CHAT_IDS, RETIREMENT_THRESHOLD
+from core.config import DB_PATH, ALLOWED_CHAT_IDS, RETIREMENT_THRESHOLD
 
 EDITABLE_FIELDS = {"word", "sentence"}
 
