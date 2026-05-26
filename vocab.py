@@ -1,5 +1,6 @@
 import os
 import random
+import re
 import sqlite3
 from datetime import datetime
 
@@ -63,6 +64,11 @@ def init_db() -> None:
                 slot_time TEXT    NOT NULL,
                 fired     INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (date, slot_time)
+            );
+
+            CREATE TABLE IF NOT EXISTS topics (
+                topic       TEXT PRIMARY KEY,
+                description TEXT NOT NULL DEFAULT ''
             );
         """)
         conn.commit()
@@ -162,6 +168,49 @@ def pick_word(chat_id: int) -> dict | None:
     now = datetime.now()
     weights = [_weight(w, now) for w in eligible]
     return random.choices(eligible, weights=weights, k=1)[0]
+
+
+def _slugify(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", text.lower().strip()).strip("_")
+
+
+def get_topic_description(topic: str) -> str:
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT description FROM topics WHERE topic = ?",
+            (topic,),
+        ).fetchone()
+        return row["description"] if row else ""
+    finally:
+        conn.close()
+
+
+def get_word_sample(chat_id: int, topic: str, n: int = 15) -> list[dict]:
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT word_id, word FROM words WHERE chat_id = ? AND topic = ? ORDER BY RANDOM() LIMIT ?",
+            (chat_id, topic, n),
+        ).fetchall()
+        return [{"id": r["word_id"], "word": r["word"]} for r in rows]
+    finally:
+        conn.close()
+
+
+def insert_word(chat_id: int, topic: str, word: str, sentence: str) -> bool:
+    word_id = _slugify(word)
+    conn = _get_conn()
+    try:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO words (chat_id, topic, word_id, word, sentence, mastery_score, last_seen) "
+            "VALUES (?, ?, ?, ?, ?, 0, NULL)",
+            (chat_id, topic, word_id, word, sentence),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 
 def record_feedback(chat_id: int, topic: str, word_id: str, result: str) -> bool:
