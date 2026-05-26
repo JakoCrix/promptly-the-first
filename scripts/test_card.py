@@ -17,8 +17,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ContextTypes
 
-from config import ALLOWED_CHAT_IDS, BOT_TOKEN
-from vocab import get_active_topic, get_word, pick_word, record_feedback
+from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN
+from core.vocab import get_active_topic, get_word, pick_word, record_feedback
 
 
 def resolve_word(chat_id: int, word_id: str | None) -> dict | None:

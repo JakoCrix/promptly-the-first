@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from vocab import _get_conn
+from core.vocab import _get_conn
 
 _MELBOURNE_TZ = ZoneInfo("Australia/Melbourne")
 

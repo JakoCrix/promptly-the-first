@@ -4,11 +4,11 @@ from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
 
-from config import ALLOWED_CHAT_IDS, BOT_TOKEN
-from persistence import mark_slot_fired
-from scheduler import MELBOURNE_TZ, get_schedule_state, wire_scheduler
-from suggest import fetch_suggestions
-from vocab import get_active_topic, get_topic_description, get_word_sample, init_db, insert_word, list_topics, pick_word, record_feedback, set_active_topic, _slugify
+from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN
+from core.persistence import mark_slot_fired
+from core.scheduler import MELBOURNE_TZ, get_schedule_state, wire_scheduler
+from core.suggest import fetch_suggestions
+from core.vocab import get_active_topic, get_topic_description, get_word_sample, init_db, insert_word, list_topics, pick_word, record_feedback, set_active_topic, _slugify
 
 
 async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:

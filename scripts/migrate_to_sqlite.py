@@ -16,8 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import ALLOWED_CHAT_IDS, DATA_DIR, DB_PATH
-from vocab import init_db, set_active_topic
+from core.config import ALLOWED_CHAT_IDS, DATA_DIR, DB_PATH
+from core.vocab import init_db, set_active_topic
 
 # Built-in seed dictionaries — seeded for every user in ALLOWED_CHAT_IDS.
 # Word IDs must be ASCII (they appear in Telegram callback_data).

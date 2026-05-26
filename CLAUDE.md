@@ -32,7 +32,7 @@ python scripts/test_card.py <word_id>      # force-send a specific word (e.g. "p
 python scripts/test_suggest.py             # test Gemini suggestions + send first card via Telegram
 python scripts/test_suggest.py <topic>    # same but override the topic (e.g. "zoo_animals")
 python scripts/migrate_to_sqlite.py        # one-shot: import JSON vocab + seed all built-in topics
-python scheduler.py                        # print today's generated slots (quick sanity check)
+python -m core.scheduler                   # print today's generated slots (quick sanity check)
 ```
 
 ## Architecture
@@ -45,10 +45,11 @@ No automated tests. All verification is manual via the scripts above.
 
 | Module | Role |
 |---|---|
-| `config.py` | Loads `.env`, exposes all tuneable constants (`DAILY_SLOTS`, `WINDOW_START/END_HOUR`, `RETIREMENT_THRESHOLD`, `NEVER_SEEN_SECONDS`) |
-| `vocab.py` | All SQLite I/O for vocab data; owns `_get_conn()`, `init_db()`, and the word selection algorithm |
-| `persistence.py` | Schedule I/O only — reads/writes the `schedule` table; imports `_get_conn` from `vocab` |
-| `scheduler.py` | Generates daily slot timestamps, registers PTB `job_queue` jobs, schedules midnight regeneration |
+| `core/config.py` | Loads `.env`, exposes all tuneable constants (`DAILY_SLOTS`, `WINDOW_START/END_HOUR`, `RETIREMENT_THRESHOLD`, `NEVER_SEEN_SECONDS`) |
+| `core/vocab.py` | All SQLite I/O for vocab data; owns `_get_conn()`, `init_db()`, and the word selection algorithm |
+| `core/persistence.py` | Schedule I/O only — reads/writes the `schedule` table; imports `_get_conn` from `vocab` |
+| `core/scheduler.py` | Generates daily slot timestamps, registers PTB `job_queue` jobs, schedules midnight regeneration |
+| `core/suggest.py` | Calls Google Gemini to generate word suggestions for a given topic |
 
 **Database:** `data/promptly.db` — a single SQLite file for all data.
 
@@ -78,4 +79,4 @@ Add an entry to `SEED_DATA` in `scripts/migrate_to_sqlite.py` and re-run the scr
 - Telegram-only UI. No web dashboard, no external DB, no images or audio.
 - `ALLOWED_CHAT_IDS` in `.env` is the allowlist — a handful of users max.
 - stdlib `sqlite3` only — no ORM, no new packages. Per-call `sqlite3.connect()` is intentional.
-- `persistence.py` imports `_get_conn` from `vocab.py` (private function, cross-module) — known design debt, acceptable at this scale.
+- `core/persistence.py` imports `_get_conn` from `core/vocab.py` (private function, cross-module) — known design debt, acceptable at this scale.

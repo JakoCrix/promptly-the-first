@@ -4,7 +4,7 @@ import re
 import sqlite3
 from datetime import datetime
 
-from config import DATA_DIR, DB_PATH, NEVER_SEEN_SECONDS, RETIREMENT_THRESHOLD
+from core.config import DATA_DIR, DB_PATH, NEVER_SEEN_SECONDS, RETIREMENT_THRESHOLD
 
 
 def _get_conn() -> sqlite3.Connection:

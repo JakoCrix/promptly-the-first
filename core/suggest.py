@@ -4,7 +4,7 @@ import re
 
 import google.generativeai as genai
 
-from config import GOOGLE_API_KEY, SUGGEST_BATCH_SIZE
+from core.config import GOOGLE_API_KEY, SUGGEST_BATCH_SIZE
 
 log = logging.getLogger(__name__)
 

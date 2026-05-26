@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from telegram import Bot
 from telegram.error import TelegramError
 
-from config import ALLOWED_CHAT_IDS, BOT_TOKEN
+from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN
 
 
 async def main() -> None:

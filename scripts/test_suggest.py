@@ -22,9 +22,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ContextTypes
 
-from config import ALLOWED_CHAT_IDS, BOT_TOKEN, GOOGLE_API_KEY
-from suggest import fetch_suggestions
-from vocab import get_active_topic, get_topic_description, get_word_sample, init_db, insert_word, _slugify
+from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN, GOOGLE_API_KEY
+from core.suggest import fetch_suggestions
+from core.vocab import get_active_topic, get_topic_description, get_word_sample, init_db, insert_word, _slugify
 
 
 async def main() -> None:

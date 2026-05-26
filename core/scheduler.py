@@ -2,8 +2,8 @@ import random
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from config import ALLOWED_CHAT_IDS, DAILY_SLOTS, WINDOW_END_HOUR, WINDOW_START_HOUR
-from persistence import load_today_schedule, save_schedule
+from core.config import ALLOWED_CHAT_IDS, DAILY_SLOTS, WINDOW_END_HOUR, WINDOW_START_HOUR
+from core.persistence import load_today_schedule, save_schedule
 
 MELBOURNE_TZ = ZoneInfo("Australia/Melbourne")
 
