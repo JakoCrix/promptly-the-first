@@ -8,12 +8,12 @@ ALLOWED_CHAT_IDS = [int(x) for x in os.environ.get("CHAT_IDS", "").split(",") if
 VOCAB_TOPIC = os.environ.get("VOCAB_TOPIC", "vocab")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 
-SUGGEST_BATCH_SIZE = 5
+SUGGEST_BATCH_SIZE = 3
 
 WINDOW_START_HOUR = 9    # notifications begin at 09:00
 WINDOW_END_HOUR = 23     # notifications end at 23:00
 DAILY_SLOTS = 10
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 DB_PATH = os.path.join(DATA_DIR, "promptly.db")
 
 # Words at or above this mastery score are retired (excluded from selection)

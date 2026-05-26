@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime
 
@@ -7,7 +8,7 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN
 from core.persistence import mark_slot_fired
 from core.scheduler import MELBOURNE_TZ, get_schedule_state, wire_scheduler
-from core.suggest import fetch_suggestions
+from core.suggest import fetch_suggestions, generate_sentence
 from core.vocab import get_active_topic, get_topic_description, get_word_sample, init_db, insert_word, list_topics, pick_word, record_feedback, set_active_topic, _slugify
 
 
@@ -16,7 +17,22 @@ async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
     word = pick_word(chat_id)
     if word is None:
         return
-    text = f"<b>{word['word']}</b>\n\n{word['sentence']}"
+
+    sentence = word["sentence"]
+    try:
+        description = get_topic_description(word["topic"])
+        ai_sentence = await asyncio.wait_for(
+            asyncio.to_thread(generate_sentence, word["word"], word["topic"], description),
+            timeout=5.0,
+        )
+        if ai_sentence:
+            sentence = ai_sentence
+    except asyncio.TimeoutError:
+        logging.debug("generate_sentence timed out for '%s' — using stored sentence", word["word"])
+    except Exception:
+        logging.warning("generate_sentence failed for '%s' — using stored sentence", word["word"], exc_info=True)
+
+    text = f"<b>{word['word']}</b>\n\n{sentence}"
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['topic']}:{word['id']}"),
         InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['topic']}:{word['id']}"),

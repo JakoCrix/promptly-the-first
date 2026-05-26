@@ -40,7 +40,7 @@ with tab1:
     retired = int((view["mastery_score"] >= RETIREMENT_THRESHOLD).sum())
     col_total, col_retired = st.columns(2)
     col_total.metric("Total Words", total)
-    col_retired.metric("Retired (mastery ≥ 10)", retired)
+    col_retired.metric(f"Retired (mastery ≥ {RETIREMENT_THRESHOLD})", retired)
 
     st.divider()
 
@@ -89,7 +89,7 @@ with tab1:
             col_warn.caption("⚠️ This cannot be undone.")
             with col_yes:
                 if st.button("Yes, delete", type="primary"):
-                    delete_word(selected_topic, selected_word_id)
+                    delete_word(selected_chat_id, selected_topic, selected_word_id)
                     st.session_state.pop(confirm_key, None)
                     st.toast(f"'{selected_word_id}' deleted 🗑️")
                     st.rerun()

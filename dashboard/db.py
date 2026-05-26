@@ -112,12 +112,12 @@ def add_to_decks(pool_id: int, topic: str, word_id: str, word: str, sentence: st
     return inserted, skipped
 
 
-def delete_word(topic: str, word_id: str) -> int:
+def delete_word(chat_id: int, topic: str, word_id: str) -> int:
     conn = _get_conn()
     try:
         cur = conn.execute(
-            "DELETE FROM words WHERE topic = ? AND word_id = ?",
-            (topic, word_id),
+            "DELETE FROM words WHERE chat_id = ? AND topic = ? AND word_id = ?",
+            (chat_id, topic, word_id),
         )
         conn.commit()
         return cur.rowcount
