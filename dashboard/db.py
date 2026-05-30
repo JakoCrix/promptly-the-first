@@ -8,9 +8,9 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.config import DB_PATH, ALLOWED_CHAT_IDS, RETIREMENT_THRESHOLD
 
-EDITABLE_FIELDS = {"word", "sentence"}
+EDITABLE_FIELDS = {"word"}
 
-_WORDS_COLUMNS = ["chat_id", "topic", "word_id", "word", "sentence", "mastery_score", "last_seen"]
+_WORDS_COLUMNS = ["chat_id", "topic", "word_id", "word", "mastery_score", "last_seen"]
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -24,13 +24,15 @@ def init_word_pool() -> None:
     try:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS word_pool (
-                id       INTEGER PRIMARY KEY AUTOINCREMENT,
-                topic    TEXT NOT NULL,
-                word_id  TEXT NOT NULL,
-                word     TEXT NOT NULL,
-                sentence TEXT NOT NULL
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic   TEXT NOT NULL,
+                word_id TEXT NOT NULL,
+                word    TEXT NOT NULL
             )
         """)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(word_pool)")}
+        if "sentence" in cols:
+            conn.execute("ALTER TABLE word_pool DROP COLUMN sentence")
         conn.commit()
     finally:
         conn.close()
@@ -40,7 +42,7 @@ def get_all_words_df() -> pd.DataFrame:
     conn = _get_conn()
     try:
         rows = conn.execute(
-            "SELECT chat_id, topic, word_id, word, sentence, mastery_score, last_seen "
+            "SELECT chat_id, topic, word_id, word, mastery_score, last_seen "
             "FROM words ORDER BY topic, word_id"
         ).fetchall()
         return pd.DataFrame([dict(r) for r in rows], columns=_WORDS_COLUMNS)
@@ -62,12 +64,12 @@ def get_word_counts() -> dict:
         conn.close()
 
 
-def update_word_entry(chat_id: int, topic: str, word_id: str, word: str, sentence: str) -> int:
+def update_word_entry(chat_id: int, topic: str, word_id: str, word: str) -> int:
     conn = _get_conn()
     try:
         cur = conn.execute(
-            "UPDATE words SET word = ?, sentence = ? WHERE chat_id = ? AND topic = ? AND word_id = ?",
-            (word, sentence, chat_id, topic, word_id),
+            "UPDATE words SET word = ? WHERE chat_id = ? AND topic = ? AND word_id = ?",
+            (word, chat_id, topic, word_id),
         )
         conn.commit()
         return cur.rowcount
@@ -79,14 +81,14 @@ def get_word_pool() -> list:
     conn = _get_conn()
     try:
         rows = conn.execute(
-            "SELECT id, topic, word_id, word, sentence FROM word_pool ORDER BY id"
+            "SELECT id, topic, word_id, word FROM word_pool ORDER BY id"
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
 
 
-def add_to_decks(pool_id: int, topic: str, word_id: str, word: str, sentence: str) -> tuple:
+def add_to_decks(pool_id: int, topic: str, word_id: str, word: str) -> tuple:
     conn = _get_conn()
     inserted = 0
     skipped = 0
@@ -94,9 +96,9 @@ def add_to_decks(pool_id: int, topic: str, word_id: str, word: str, sentence: st
         for chat_id in ALLOWED_CHAT_IDS:
             cur = conn.execute(
                 "INSERT OR IGNORE INTO words "
-                "(chat_id, topic, word_id, word, sentence, mastery_score, last_seen) "
-                "VALUES (?, ?, ?, ?, ?, 0, NULL)",
-                (chat_id, topic, word_id, word, sentence),
+                "(chat_id, topic, word_id, word, mastery_score, last_seen) "
+                "VALUES (?, ?, ?, ?, 0, NULL)",
+                (chat_id, topic, word_id, word),
             )
             if cur.rowcount == 1:
                 inserted += 1

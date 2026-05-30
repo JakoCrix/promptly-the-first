@@ -18,7 +18,6 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "id":            row["word_id"],
         "topic":         row["topic"],
         "word":          row["word"],
-        "sentence":      row["sentence"],
         "mastery_score": row["mastery_score"],
         "last_seen":     row["last_seen"],
     }
@@ -34,7 +33,6 @@ def init_db() -> None:
                 topic         TEXT    NOT NULL,
                 word_id       TEXT    NOT NULL,
                 word          TEXT    NOT NULL,
-                sentence      TEXT    NOT NULL,
                 mastery_score INTEGER NOT NULL DEFAULT 0,
                 last_seen     TEXT,
                 PRIMARY KEY (chat_id, topic, word_id)
@@ -72,6 +70,10 @@ def init_db() -> None:
             );
         """)
         conn.commit()
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(words)")}
+        if "sentence" in cols:
+            conn.execute("ALTER TABLE words DROP COLUMN sentence")
+            conn.commit()
     finally:
         conn.close()
 
@@ -116,7 +118,7 @@ def get_word(chat_id: int, topic: str, word_id: str) -> dict | None:
     conn = _get_conn()
     try:
         row = conn.execute(
-            "SELECT word_id, topic, word, sentence, mastery_score, last_seen "
+            "SELECT word_id, topic, word, mastery_score, last_seen "
             "FROM words WHERE chat_id = ? AND topic = ? AND word_id = ?",
             (chat_id, topic, word_id),
         ).fetchone()
@@ -155,7 +157,7 @@ def pick_word(chat_id: int) -> dict | None:
             topic = first["topic"]
 
         rows = conn.execute(
-            "SELECT word_id, topic, word, sentence, mastery_score, last_seen "
+            "SELECT word_id, topic, word, mastery_score, last_seen "
             "FROM words WHERE chat_id = ? AND topic = ? AND mastery_score < ?",
             (chat_id, topic, RETIREMENT_THRESHOLD),
         ).fetchall()
@@ -198,14 +200,14 @@ def get_word_sample(chat_id: int, topic: str, n: int = 15) -> list[dict]:
         conn.close()
 
 
-def insert_word(chat_id: int, topic: str, word: str, sentence: str) -> bool:
+def insert_word(chat_id: int, topic: str, word: str) -> bool:
     word_id = _slugify(word)
     conn = _get_conn()
     try:
         cursor = conn.execute(
-            "INSERT OR IGNORE INTO words (chat_id, topic, word_id, word, sentence, mastery_score, last_seen) "
-            "VALUES (?, ?, ?, ?, ?, 0, NULL)",
-            (chat_id, topic, word_id, word, sentence),
+            "INSERT OR IGNORE INTO words (chat_id, topic, word_id, word, mastery_score, last_seen) "
+            "VALUES (?, ?, ?, ?, 0, NULL)",
+            (chat_id, topic, word_id, word),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -237,12 +239,12 @@ def record_feedback(chat_id: int, topic: str, word_id: str, result: str) -> bool
             "WHERE chat_id = ? AND topic = ? AND word_id = ?",
             (new_score, now, chat_id, topic, word_id),
         )
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO history (chat_id, topic, word_id, timestamp, result) "
             "VALUES (?, ?, ?, ?, ?)",
             (chat_id, topic, word_id, now, result),
         )
         conn.commit()
-        return True
+        return cur.rowcount == 1
     finally:
         conn.close()

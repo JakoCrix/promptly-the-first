@@ -82,7 +82,7 @@ async def main() -> None:
             word = resolve_word(chat_id, word_id)
             if word is None:
                 continue
-            text = f"<b>{word['word']}</b>\n\n{word['sentence']}"
+            text = f"<b>{word['word']}</b>"
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['topic']}:{word['id']}"),
                 InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['topic']}:{word['id']}"),

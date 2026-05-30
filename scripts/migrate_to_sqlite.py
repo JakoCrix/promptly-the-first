@@ -23,40 +23,40 @@ from core.vocab import init_db, set_active_topic
 # Word IDs must be ASCII (they appear in Telegram callback_data).
 SEED_DATA = {
     "chinese": [
-        ("ni_hao",   "你好",  "你好！很高兴认识你。(Hello! Nice to meet you.)"),
-        ("xie_xie",  "谢谢",  "谢谢你帮助我。(Thank you for helping me.)"),
-        ("shui",     "水",    "我想喝一杯水。(I want to drink a glass of water.)"),
-        ("shu",      "书",    "我正在读一本有趣的书。(I am reading an interesting book.)"),
-        ("mao",      "猫",    "那只猫在窗台上睡觉。(That cat is sleeping on the windowsill.)"),
-        ("gou",      "狗",    "那只狗跑得很快。(That dog runs very fast.)"),
-        ("chi",      "吃",    "我每天早上吃早饭。(I eat breakfast every morning.)"),
-        ("da",       "大",    "大象是世界上最大的陆地动物之一。(Elephants are among the largest land animals.)"),
-        ("xiao",     "小",    "这只小猫非常可爱。(This little cat is very cute.)"),
-        ("peng_you", "朋友",  "他是我最好的朋友。(He is my best friend.)"),
+        ("ni_hao",   "你好"),
+        ("xie_xie",  "谢谢"),
+        ("shui",     "水"),
+        ("shu",      "书"),
+        ("mao",      "猫"),
+        ("gou",      "狗"),
+        ("chi",      "吃"),
+        ("da",       "大"),
+        ("xiao",     "小"),
+        ("peng_you", "朋友"),
     ],
     "zoo_animals": [
-        ("tapir",     "tapir",     "The tapir used its short, flexible snout to pluck leaves from low-hanging branches near the river's edge."),
-        ("okapi",     "okapi",     "Resembling a horse with zebra-striped legs, the okapi is the giraffe's only living relative and was unknown to science until 1901."),
-        ("binturong", "binturong", "The binturong hung by its prehensile tail in the canopy, filling the air around it with an inexplicable scent of warm popcorn."),
-        ("pangolin",  "pangolin",  "When the pangolin sensed danger, it curled into a tight ball, its overlapping keratin scales forming a near-impenetrable armour."),
-        ("mandrill",  "mandrill",  "The mandrill's vivid red and blue face markings grow brighter with age, advertising its dominance to rivals."),
-        ("aardvark",  "aardvark",  "The aardvark uses its long, sticky tongue to consume tens of thousands of termites in a single night."),
-        ("capybara",  "capybara",  "Despite being the world's largest rodent, the capybara is remarkably docile and is often seen grooming birds perched on its back."),
-        ("axolotl",   "axolotl",   "The axolotl never undergoes metamorphosis, retaining its feathery external gills and larval features throughout its entire life."),
-        ("quokka",    "quokka",    "The quokka's perpetual upturned mouth has earned it the reputation of being the world's happiest animal."),
-        ("cassowary", "cassowary", "Despite its vivid blue neck and red wattles, the cassowary is considered one of the most dangerous birds alive, capable of delivering a lethal kick."),
+        ("tapir",     "tapir"),
+        ("okapi",     "okapi"),
+        ("binturong", "binturong"),
+        ("pangolin",  "pangolin"),
+        ("mandrill",  "mandrill"),
+        ("aardvark",  "aardvark"),
+        ("capybara",  "capybara"),
+        ("axolotl",   "axolotl"),
+        ("quokka",    "quokka"),
+        ("cassowary", "cassowary"),
     ],
     "vegetables": [
-        ("artichoke", "artichoke", "The artichoke's edible heart is hidden beneath dozens of tough, spiky leaves."),
-        ("asparagus", "asparagus", "Fresh asparagus spears snap cleanly at their natural breaking point when bent."),
-        ("beetroot",  "beetroot",  "The deep purple beetroot bled its vivid colour into everything else on the plate."),
-        ("courgette", "courgette", "She sliced the courgette into thin ribbons and tossed them with olive oil and lemon."),
-        ("fennel",    "fennel",    "The fennel bulb has a mild anise flavour that mellows considerably when roasted."),
-        ("kohlrabi",  "kohlrabi",  "Kohlrabi looks like a spaceship landed in the vegetable patch, with leaves shooting in all directions."),
-        ("leek",      "leek",      "A classic vichyssoise is made from leeks, potatoes, cream, and patience."),
-        ("parsnip",   "parsnip",   "Roasted parsnips caramelise at the edges and develop a sweet, nutty flavour."),
-        ("celeriac",  "celeriac",  "Beneath its gnarled exterior, celeriac has a mild celery flavour and creamy texture when cooked."),
-        ("radicchio", "radicchio", "The bitter radicchio wilted into silky ribbons when tossed through the warm pasta."),
+        ("artichoke", "artichoke"),
+        ("asparagus", "asparagus"),
+        ("beetroot",  "beetroot"),
+        ("courgette", "courgette"),
+        ("fennel",    "fennel"),
+        ("kohlrabi",  "kohlrabi"),
+        ("leek",      "leek"),
+        ("parsnip",   "parsnip"),
+        ("celeriac",  "celeriac"),
+        ("radicchio", "radicchio"),
     ],
 }
 
@@ -90,9 +90,9 @@ def migrate_vocab_files(conn: sqlite3.Connection) -> tuple[list[str], dict[int, 
         for word in words:
             conn.execute(
                 "INSERT OR REPLACE INTO words "
-                "(chat_id, topic, word_id, word, sentence, mastery_score, last_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (chat_id, topic, word["id"], word["word"], word["sentence"],
+                "(chat_id, topic, word_id, word, mastery_score, last_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (chat_id, topic, word["id"], word["word"],
                  word["mastery_score"], word["last_seen"]),
             )
             n_words += 1
@@ -137,12 +137,12 @@ def seed_topics(conn: sqlite3.Connection) -> None:
 
     for topic, words in SEED_DATA.items():
         for chat_id in ALLOWED_CHAT_IDS:
-            for word_id, word, sentence in words:
+            for word_id, word in words:
                 conn.execute(
                     "INSERT OR IGNORE INTO words "
-                    "(chat_id, topic, word_id, word, sentence, mastery_score, last_seen) "
-                    "VALUES (?, ?, ?, ?, ?, 0, NULL)",
-                    (chat_id, topic, word_id, word, sentence),
+                    "(chat_id, topic, word_id, word, mastery_score, last_seen) "
+                    "VALUES (?, ?, ?, ?, 0, NULL)",
+                    (chat_id, topic, word_id, word),
                 )
         conn.commit()
         print(f"  Seeded '{topic}': {len(words)} words for {len(ALLOWED_CHAT_IDS)} user(s)")

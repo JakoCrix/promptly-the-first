@@ -90,7 +90,7 @@ async def main() -> None:
             return
 
         if action == "suggest_y":
-            added = insert_word(cid, t, word, sentence)
+            added = insert_word(cid, t, word.split(" (")[0].strip())
             result_holder["status"] = "Added!" if added else "Already exists — not inserted."
         else:
             result_holder["status"] = "Skipped."

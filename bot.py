@@ -9,7 +9,7 @@ from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN
 from core.persistence import mark_slot_fired
 from core.scheduler import MELBOURNE_TZ, get_schedule_state, wire_scheduler
 from core.suggest import fetch_suggestions, generate_sentence
-from core.vocab import get_active_topic, get_topic_description, get_word_sample, init_db, insert_word, list_topics, pick_word, record_feedback, set_active_topic, _slugify
+from core.vocab import get_active_topic, get_topic_description, get_word, get_word_sample, init_db, insert_word, list_topics, pick_word, record_feedback, set_active_topic, _slugify
 
 
 async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -18,21 +18,19 @@ async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
     if word is None:
         return
 
-    sentence = word["sentence"]
+    sentence = None
     try:
         description = get_topic_description(word["topic"])
-        ai_sentence = await asyncio.wait_for(
+        sentence = await asyncio.wait_for(
             asyncio.to_thread(generate_sentence, word["word"], word["topic"], description),
             timeout=5.0,
         )
-        if ai_sentence:
-            sentence = ai_sentence
     except asyncio.TimeoutError:
-        logging.debug("generate_sentence timed out for '%s' — using stored sentence", word["word"])
+        logging.debug("generate_sentence timed out for '%s'", word["word"])
     except Exception:
-        logging.warning("generate_sentence failed for '%s' — using stored sentence", word["word"], exc_info=True)
+        logging.warning("generate_sentence failed for '%s'", word["word"], exc_info=True)
 
-    text = f"<b>{word['word']}</b>\n\n{sentence}"
+    text = f"<b>{word['word']}</b>" + (f"\n\n{sentence}" if sentence else "")
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['topic']}:{word['id']}"),
         InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['topic']}:{word['id']}"),
@@ -205,14 +203,25 @@ async def suggest_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     pending = context.bot_data.get("pending", {}).get(chat_id, [])
     if not pending or pending[0]["word_id"] != word_id:
-        await query.edit_message_reply_markup(reply_markup=None)
+        await query.edit_message_text(
+            "Session expired — run /suggest again to restart.",
+            parse_mode=None,
+        )
         return
 
     item = pending.pop(0)
 
     if action == "suggest_y":
-        added = insert_word(chat_id, topic, item["word"], item["sentence"])
-        status = "✅ Added!" if added else "Already exists."
+        stored_word = item["word"].split(" (")[0].strip()
+        added = insert_word(chat_id, topic, stored_word)
+        if added:
+            status = "✅ Added!"
+        else:
+            existing = get_word(chat_id, topic, _slugify(stored_word))
+            if existing and existing["word"].lower() != stored_word.lower():
+                status = f"Skipped — conflicts with existing word '{existing['word']}' (same ID)."
+            else:
+                status = "Already in your deck."
     else:
         status = "❌ Skipped."
 

@@ -78,7 +78,13 @@ No automated tests. All verification is manual via the scripts above.
 
 **Multi-topic:** Each user independently tracks mastery per topic. Switch via `/topic <name>` in Telegram (stored in `user_settings`). Built-in seed topics (`zoo_animals`, `chinese`, `vegetables`) are defined in `scripts/migrate_to_sqlite.py:SEED_DATA` and seeded for all `ALLOWED_CHAT_IDS` when the migration script is run.
 
-**AI suggestions (`/suggest`):** Admin-only command. Fetches the active topic's description from the `topics` table, samples up to 15 existing words, and sends both as context to Gemini. Returns `SUGGEST_BATCH_SIZE` (default 5) suggestions as inline Yes/No cards. Pending suggestions are held in `context.bot_data["pending"][chat_id]` (in-memory). Approved words are inserted via `core/vocab.insert_word()` which slugifies the word text into an ASCII `word_id`.
+**AI suggestions (`/suggest`):** Admin-only command. Fetches the active topic's description from the `topics` table, samples up to 15 existing words, and sends both as context to Gemini. Returns `SUGGEST_BATCH_SIZE` (currently 3) suggestions as inline Yes/No cards. Pending suggestions are held in `context.bot_data["pending"][chat_id]` (in-memory). Approved words are inserted via `core/vocab.insert_word()` which slugifies the word text into an ASCII `word_id` using `re.sub(r"[^a-z0-9]+", "_", text.lower().strip()).strip("_")`.
+
+**Card delivery (`send_card`):** Before sending, calls `generate_sentence()` (gemini-2.5-flash) with a 5-second `asyncio.wait_for` timeout. If the call times out or raises, the card is sent without a sentence — the word alone is never suppressed.
+
+**Mastery updates (`record_feedback`):** `known` → `mastery_score + 1`; `forgot` → `max(0, mastery_score - 1)`. Deleting a word via the dashboard does NOT cascade-delete its `history` rows.
+
+**Bot commands:** `/start` — welcome message; `/schedule` — show today's pending/fired slots in Melbourne time; `/topic [name]` — view or switch active topic; `/suggest` — trigger AI word suggestions for the active topic.
 
 ## Adding a new topic
 

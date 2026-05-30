@@ -23,6 +23,12 @@ def generate_daily_timestamps(reference_date: datetime | None = None) -> list[da
     window_open = WINDOW_START_HOUR * 3600   # seconds since midnight
     window_close = WINDOW_END_HOUR * 3600
 
+    window_seconds = window_close - window_open
+    if DAILY_SLOTS > window_seconds:
+        raise ValueError(
+            f"DAILY_SLOTS ({DAILY_SLOTS}) exceeds available window seconds ({window_seconds}). "
+            "Reduce DAILY_SLOTS or widen WINDOW_START/END_HOUR in config."
+        )
     offsets = random.sample(range(window_open, window_close), DAILY_SLOTS)
     offsets.sort()
 

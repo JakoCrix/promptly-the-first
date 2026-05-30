@@ -55,23 +55,18 @@ with tab1:
 
         current = view[view["word_id"] == selected_word_id].iloc[0]
         with st.form("edit_word_form"):
-            col_word, col_sentence = st.columns(2)
-            with col_word:
-                new_word = st.text_input("Word", value=current["word"])
-            with col_sentence:
-                new_sentence = st.text_area("Sentence", value=current["sentence"])
+            new_word = st.text_input("Word", value=current["word"])
             submitted = st.form_submit_button("Update")
 
         if submitted:
-            if not new_word.strip() or not new_sentence.strip():
-                st.warning("Word and sentence cannot be empty.")
+            if not new_word.strip():
+                st.warning("Word cannot be empty.")
             else:
                 rowcount = update_word_entry(
                     selected_chat_id,
                     selected_topic,
                     selected_word_id,
                     new_word.strip(),
-                    new_sentence.strip(),
                 )
                 if rowcount > 0:
                     st.toast(f"'{selected_word_id}' updated ✅")
@@ -122,7 +117,6 @@ with tab2:
                 with left:
                     st.markdown(f"**{row['word']}** — `{row['word_id']}`")
                     st.caption(f"Topic: {row['topic']}")
-                    st.write(row["sentence"])
                 with right:
                     if st.button("✅ Add to Decks", key=f"add_{row['id']}"):
                         try:
@@ -131,7 +125,6 @@ with tab2:
                                 row["topic"],
                                 row["word_id"],
                                 row["word"],
-                                row["sentence"],
                             )
                             msg = f"Added '{row['word']}' to {inserted} deck(s)"
                             if skipped:
