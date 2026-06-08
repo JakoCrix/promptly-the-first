@@ -1,3 +1,4 @@
+# python bot.py
 import asyncio
 import logging
 from datetime import datetime
@@ -9,7 +10,7 @@ from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN
 from core.persistence import mark_slot_fired
 from core.scheduler import MELBOURNE_TZ, get_schedule_state, wire_scheduler
 from core.suggest import fetch_suggestions, generate_sentence
-from core.vocab import get_active_topic, get_topic_description, get_word, get_word_sample, init_db, insert_word, list_topics, pick_word, record_feedback, set_active_topic, slugify
+from core.vocab import get_active_topic, get_topic_description, get_word, get_word_sample, init_db, insert_word, list_topics, pick_word, record_feedback, set_active_topic, _slugify
 
 
 async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -60,50 +61,9 @@ async def start_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
         "Commands:\n"
         "/schedule — see today's prompt times and which have already fired\n"
         "/topic — see or switch your active vocabulary topic. Type /topic <name> to switch to a different topic.\n"
-        "/test — send a random card from your active topic. Type /test <word_id> for a specific word.\n"
         "/suggest — get AI-generated word suggestions for your active topic",
         parse_mode=None,
     )
-
-
-async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.effective_chat.id
-    if chat_id not in ALLOWED_CHAT_IDS:
-        return
-
-    word_id_arg = context.args[0] if context.args else None
-
-    if word_id_arg:
-        topic = get_active_topic(chat_id)
-        if topic is None:
-            await update.message.reply_text("No active topic set. Use /topic <name> to choose one.")
-            return
-        word = get_word(chat_id, topic, word_id_arg)
-        if word is None:
-            await update.message.reply_text(f"Word '{word_id_arg}' not found in topic '{topic}'.")
-            return
-    else:
-        word = pick_word(chat_id)
-        if word is None:
-            await update.message.reply_text("No eligible words (all retired, or no active topic).")
-            return
-
-    sentence = None
-    try:
-        description = get_topic_description(word["topic"])
-        sentence = await asyncio.to_thread(
-            generate_sentence, word["word"], word["topic"], description, word.get("hint")
-        )
-    except Exception:
-        logging.warning("generate_sentence failed for '%s'", word["word"], exc_info=True)
-
-    hint_line = f"\n<i>{word['hint']}</i>" if word.get("hint") else ""
-    text = f"<b>{word['word']}</b>{hint_line}" + (f"\n\n{sentence}" if sentence else "")
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['topic']}:{word['id']}"),
-        InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['topic']}:{word['id']}"),
-    ]])
-    await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -255,12 +215,11 @@ async def suggest_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if action == "suggest_y":
         stored_word = item["word"].split(" (")[0].strip()
-        item = {**item, "word": stored_word}
         added = insert_word(chat_id, topic, stored_word)
         if added:
             status = "✅ Added!"
         else:
-            existing = get_word(chat_id, topic, slugify(stored_word))
+            existing = get_word(chat_id, topic, _slugify(stored_word))
             if existing and existing["word"].lower() != stored_word.lower():
                 status = f"Skipped — conflicts with existing word '{existing['word']}' (same ID)."
             else:
@@ -294,7 +253,6 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("schedule", schedule_command))
     app.add_handler(CommandHandler("topic", topic_command))
-    app.add_handler(CommandHandler("test", test_command))
     app.add_handler(CommandHandler("suggest", suggest_command))
     app.add_handler(
         CallbackQueryHandler(feedback_handler, pattern=r"^(known|forgot):\d+:[^:]+:.+$")
