@@ -18,22 +18,23 @@ from telegram.error import TelegramError
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ContextTypes
 
 from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN
-from core.vocab import get_active_topic, get_word, pick_word, record_feedback
+from core.suggest import generate_sentence
+from core.vocab import get_active_topic, get_topic_description, get_word, pick_word, record_feedback
 
 
 def resolve_word(chat_id: int, word_id: str | None) -> dict | None:
     if word_id:
         topic = get_active_topic(chat_id)
         if topic is None:
-            print(f"  ✗ No active topic set for chat {chat_id} — run /topic in Telegram first")
+            print(f"  No active topic set for chat {chat_id} — run /topic in Telegram first")
             return None
         word = get_word(chat_id, topic, word_id)
         if word is None:
-            print(f"  ✗ Word '{word_id}' not found in topic '{topic}' for chat {chat_id}")
+            print(f"  Word '{word_id}' not found in topic '{topic}' for chat {chat_id}")
         return word
     word = pick_word(chat_id)
     if word is None:
-        print(f"  ✗ No eligible words for chat {chat_id} (no active topic or all retired)")
+        print(f"  No eligible words for chat {chat_id} (no active topic or all retired)")
     return word
 
 
@@ -64,7 +65,7 @@ async def main() -> None:
         record_feedback(chat_id, topic, wid, result)
         await query.edit_message_reply_markup(reply_markup=None)
         label = "Known" if result == "known" else "Forgot"
-        print(f"  ✓ '{wid}' marked as {label} — mastery updated")
+        print(f"  '{wid}' marked as {label} — mastery updated")
         stop_event.set()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -82,10 +83,22 @@ async def main() -> None:
             word = resolve_word(chat_id, word_id)
             if word is None:
                 continue
-            text = f"<b>{word['word']}</b>"
+
+            sentence = None
+            try:
+                description = get_topic_description(word["topic"])
+                sentence = await asyncio.to_thread(
+                    generate_sentence, word["word"], word["topic"], description, word.get("hint")
+                )
+            except Exception as e:
+                print(f"  generate_sentence failed: {e} — sending without sentence")
+
+            hint_line = f"\n<i>{word['hint']}</i>" if word.get("hint") else ""
+            text = f"<b>{word['word']}</b>{hint_line}" + (f"\n\n{sentence}" if sentence else "")
+
             keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['topic']}:{word['id']}"),
-                InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['topic']}:{word['id']}"),
+                InlineKeyboardButton("Known", callback_data=f"known:{chat_id}:{word['topic']}:{word['id']}"),
+                InlineKeyboardButton("Forgot", callback_data=f"forgot:{chat_id}:{word['topic']}:{word['id']}"),
             ]])
             try:
                 await app.bot.send_message(
@@ -94,10 +107,10 @@ async def main() -> None:
                     reply_markup=keyboard,
                     parse_mode="HTML",
                 )
-                print(f"  ✓ Sent '{word['word']}' to {chat_id} — press a button in Telegram")
+                print(f"  Sent '{word['id']}' to {chat_id} — press a button in Telegram")
                 sent = True
             except TelegramError as e:
-                print(f"  ✗ Failed for {chat_id}: {e}")
+                print(f"  Failed for {chat_id}: {e}")
 
         if sent:
             print("Waiting for button press... (Ctrl+C to cancel)")

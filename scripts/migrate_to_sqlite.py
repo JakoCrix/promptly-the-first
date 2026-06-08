@@ -89,11 +89,13 @@ def migrate_vocab_files(conn: sqlite3.Connection) -> tuple[list[str], dict[int, 
 
         for word in words:
             conn.execute(
-                "INSERT OR REPLACE INTO words "
-                "(chat_id, topic, word_id, word, mastery_score, last_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (chat_id, topic, word["id"], word["word"],
-                 word["mastery_score"], word["last_seen"]),
+                "INSERT OR IGNORE INTO corpus (topic, word_id, word) VALUES (?, ?, ?)",
+                (topic, word["id"], word["word"]),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO user_progress "
+                "(chat_id, topic, word_id, mastery_score, last_seen) VALUES (?, ?, ?, ?, ?)",
+                (chat_id, topic, word["id"], word["mastery_score"], word["last_seen"]),
             )
             n_words += 1
 
@@ -130,22 +132,15 @@ TOPIC_DESCRIPTIONS = {
 
 
 def seed_topics(conn: sqlite3.Connection) -> None:
-    """Seed built-in dictionaries for every user in ALLOWED_CHAT_IDS."""
-    if not ALLOWED_CHAT_IDS:
-        print("  No ALLOWED_CHAT_IDS configured — skipping seed")
-        return
-
+    """Seed built-in dictionaries into corpus."""
     for topic, words in SEED_DATA.items():
-        for chat_id in ALLOWED_CHAT_IDS:
-            for word_id, word in words:
-                conn.execute(
-                    "INSERT OR IGNORE INTO words "
-                    "(chat_id, topic, word_id, word, mastery_score, last_seen) "
-                    "VALUES (?, ?, ?, ?, 0, NULL)",
-                    (chat_id, topic, word_id, word),
-                )
+        for word_id, word in words:
+            conn.execute(
+                "INSERT OR IGNORE INTO corpus (topic, word_id, word) VALUES (?, ?, ?)",
+                (topic, word_id, word),
+            )
         conn.commit()
-        print(f"  Seeded '{topic}': {len(words)} words for {len(ALLOWED_CHAT_IDS)} user(s)")
+        print(f"  Seeded '{topic}': {len(words)} words into corpus")
 
     for topic, description in TOPIC_DESCRIPTIONS.items():
         conn.execute(

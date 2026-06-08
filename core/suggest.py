@@ -53,11 +53,13 @@ def fetch_suggestions(topic: str, description: str, existing_words: list[str]) -
     return results
 
 
-def generate_sentence(word: str, topic: str, description: str) -> str | None:
+def generate_sentence(word: str, topic: str, description: str, hint: str | None = None) -> str | None:
     """Generate one fresh sentence for a vocab card. Returns None on any failure."""
+    hint_line = f'Pronunciation and meaning: "{hint}"\n' if hint else ""
     prompt = (
-        f'Generate exactly one natural sentence that uses the word or phrase "{word}" '
+        f'Generate exactly one natural example sentence that uses the word or phrase "{word}" '
         f'in the context of the topic "{topic}".\n'
+        f"{hint_line}"
         f"Topic description: {description or topic}\n"
         "Return only the sentence itself — no labels, no quotes, no extra text."
     )

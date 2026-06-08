@@ -10,7 +10,7 @@ from core.config import DB_PATH, ALLOWED_CHAT_IDS, RETIREMENT_THRESHOLD
 
 EDITABLE_FIELDS = {"word"}
 
-_WORDS_COLUMNS = ["chat_id", "topic", "word_id", "word", "mastery_score", "last_seen"]
+_WORDS_COLUMNS = ["chat_id", "topic", "word_id", "word", "hint", "mastery_score", "last_seen"]
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -42,23 +42,35 @@ def get_all_words_df() -> pd.DataFrame:
     conn = _get_conn()
     try:
         rows = conn.execute(
-            "SELECT chat_id, topic, word_id, word, mastery_score, last_seen "
-            "FROM words ORDER BY topic, word_id"
+            "SELECT up.chat_id, c.topic, c.word_id, c.word, c.hint, "
+            "COALESCE(up.mastery_score, 0) AS mastery_score, up.last_seen "
+            "FROM corpus c "
+            "LEFT JOIN user_progress up ON c.topic = up.topic AND c.word_id = up.word_id "
+            "ORDER BY c.topic, c.word_id"
         ).fetchall()
         return pd.DataFrame([dict(r) for r in rows], columns=_WORDS_COLUMNS)
     finally:
         conn.close()
 
 
-def get_word_counts() -> dict:
+def get_word_counts(chat_id: int | None = None) -> dict:
     conn = _get_conn()
     try:
-        row = conn.execute(
-            "SELECT COUNT(*) AS total, "
-            "SUM(CASE WHEN mastery_score >= ? THEN 1 ELSE 0 END) AS retired "
-            "FROM words",
-            (RETIREMENT_THRESHOLD,),
-        ).fetchone()
+        if chat_id is not None:
+            row = conn.execute(
+                "SELECT "
+                "(SELECT COUNT(*) FROM corpus) AS total, "
+                "(SELECT COUNT(*) FROM user_progress "
+                " WHERE chat_id = ? AND mastery_score >= ?) AS retired",
+                (chat_id, RETIREMENT_THRESHOLD),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT "
+                "(SELECT COUNT(*) FROM corpus) AS total, "
+                "(SELECT COUNT(*) FROM user_progress WHERE mastery_score >= ?) AS retired",
+                (RETIREMENT_THRESHOLD,),
+            ).fetchone()
         return {"total": row["total"] or 0, "retired": row["retired"] or 0}
     finally:
         conn.close()
@@ -68,8 +80,8 @@ def update_word_entry(chat_id: int, topic: str, word_id: str, word: str) -> int:
     conn = _get_conn()
     try:
         cur = conn.execute(
-            "UPDATE words SET word = ? WHERE chat_id = ? AND topic = ? AND word_id = ?",
-            (word, chat_id, topic, word_id),
+            "UPDATE corpus SET word = ? WHERE topic = ? AND word_id = ?",
+            (word, topic, word_id),
         )
         conn.commit()
         return cur.rowcount
@@ -90,20 +102,13 @@ def get_word_pool() -> list:
 
 def add_to_decks(pool_id: int, topic: str, word_id: str, word: str) -> tuple:
     conn = _get_conn()
-    inserted = 0
-    skipped = 0
     try:
-        for chat_id in ALLOWED_CHAT_IDS:
-            cur = conn.execute(
-                "INSERT OR IGNORE INTO words "
-                "(chat_id, topic, word_id, word, mastery_score, last_seen) "
-                "VALUES (?, ?, ?, ?, 0, NULL)",
-                (chat_id, topic, word_id, word),
-            )
-            if cur.rowcount == 1:
-                inserted += 1
-            else:
-                skipped += 1
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO corpus (topic, word_id, word) VALUES (?, ?, ?)",
+            (topic, word_id, word),
+        )
+        inserted = cur.rowcount
+        skipped = 1 - inserted
         conn.execute("DELETE FROM word_pool WHERE id = ?", (pool_id,))
         conn.commit()
     except Exception:
@@ -117,9 +122,13 @@ def add_to_decks(pool_id: int, topic: str, word_id: str, word: str) -> tuple:
 def delete_word(chat_id: int, topic: str, word_id: str) -> int:
     conn = _get_conn()
     try:
-        cur = conn.execute(
-            "DELETE FROM words WHERE chat_id = ? AND topic = ? AND word_id = ?",
+        conn.execute(
+            "DELETE FROM user_progress WHERE chat_id = ? AND topic = ? AND word_id = ?",
             (chat_id, topic, word_id),
+        )
+        cur = conn.execute(
+            "DELETE FROM corpus WHERE topic = ? AND word_id = ?",
+            (topic, word_id),
         )
         conn.commit()
         return cur.rowcount
