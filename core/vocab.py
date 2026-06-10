@@ -162,6 +162,13 @@ def init_db() -> None:
                     );
                 """)
                 conn.commit()
+
+        # Add frequency_rank to corpus for ordered word lists (Stage 1 corpus ingestion).
+        if "corpus" in tables:
+            corpus_cols = {r[1] for r in conn.execute("PRAGMA table_info(corpus)")}
+            if "frequency_rank" not in corpus_cols:
+                conn.execute("ALTER TABLE corpus ADD COLUMN frequency_rank INTEGER")
+                conn.commit()
     finally:
         conn.close()
 

@@ -31,13 +31,20 @@ INVITE_CODE=<invite-code-for-self-registration>
 ## Manual test scripts
 
 ```bash
-python scripts/test_connection.py          # verify token + chat IDs, sends a test message
-python scripts/test_card.py                # force-send a random card and wait for button press
-python scripts/test_card.py <word_id>      # force-send a specific word (e.g. "pangolin", "ni_hao")
-python scripts/test_prefill.py             # pre-generate sentence cache for all users immediately
-python scripts/migrate_to_sqlite.py        # one-shot: import JSON vocab + seed all built-in topics
-python scripts/import_hsk.py              # download and import HSK 3.0 levels 1–7 into the corpus
-python -m core.scheduler                   # print today's generated slots (quick sanity check)
+python scripts/test_connection.py                         # verify token + chat IDs, sends a test message
+python scripts/test_card.py                               # force-send a random card and wait for button press
+python scripts/test_card.py <word_id>                     # force-send a specific word (e.g. "pangolin", "ni_hao")
+python scripts/test_prefill.py                            # pre-generate sentence cache for all users immediately
+python scripts/migrate_to_sqlite.py                       # one-shot: import JSON vocab + seed all built-in topics
+python -m core.scheduler                                  # print today's generated slots (quick sanity check)
+
+# Corpus importers (scripts/corpora/) — safe to re-run (INSERT OR IGNORE)
+python scripts/corpora/import_chinese.py            # dry-run: show existing chinese_hsk* row count
+python scripts/corpora/import_chinese.py --confirm  # delete old chinese_hsk* and import HSK 3.0 (9 levels)
+python scripts/corpora/import_english.py            # import NGSL 1.01 (~2,800 words, english_ngsl)
+python scripts/corpora/import_japanese.py           # import JLPT N5–N1 (5 topics)
+python scripts/corpora/import_korean.py             # import Korean freq list across 6 TOPIK-approx levels
+python scripts/corpora/import_spanish.py            # import Spanish freq list across 6 PCIC-approx levels
 ```
 
 ## Architecture
@@ -64,7 +71,7 @@ No automated tests. All verification is manual via the scripts above.
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `corpus` | Shared word definitions, one row per word | PK: `(topic, word_id)`; columns: `word`, `hint` |
+| `corpus` | Shared word definitions, one row per word | PK: `(topic, word_id)`; columns: `word`, `hint`, `frequency_rank` |
 | `user_progress` | Per-user mastery tracking | PK: `(chat_id, topic, word_id)`; FK → corpus; columns: `mastery_score`, `last_seen` |
 | `history` | Every Known/Forgot event | FK → user_progress; `UNIQUE (chat_id, topic, word_id, timestamp, result)` |
 | `user_settings` | Each user's active topic | PK: `chat_id` |
@@ -91,6 +98,30 @@ The `hint` column on `corpus` stores tone-marked pinyin + first English meaning 
 **Mastery updates (`record_feedback`):** `known` → `mastery_score + 1`; `forgot` → `max(0, mastery_score - 1)`. Deleting a word via the dashboard removes it from both `corpus` and `user_progress` but does NOT cascade-delete its `history` rows.
 
 **Bot commands:** `/start` — welcome message; `/register <code>` — self-register with invite code; `/schedule` — show today's pending/fired slots in Melbourne time; `/topic [name]` — view or switch active topic; `/test [word_id]` — send 3 weighted-random cards right now, or a specific word if `word_id` given.
+
+## Corpus pipeline (Stage 1 languages)
+
+Import scripts live in `scripts/corpora/`. Each script is self-contained and safe to re-run (`INSERT OR IGNORE`). Shared utilities are in `scripts/corpora/_base.py` (re-exports `slugify` and `_get_conn` from `core.vocab`; provides `validate_word_id`, `bulk_insert`, and `normalize_slug` for accent-bearing scripts).
+
+**Topic naming convention:** `{language}_{list}_{level}`
+
+| Language | Topics | Source |
+|---|---|---|
+| Chinese | `chinese_hsk_1` … `chinese_hsk_9` | drkameleon/complete-hsk-vocabulary (GitHub JSON) |
+| English | `english_ngsl` | koba-ninkigumi/ngsl NGSL-1.01.csv (CC BY-SA 4.0) |
+| Japanese | `japanese_jlpt_n5` … `japanese_jlpt_n1` | jamsinclair/open-anki-jlpt-decks (MIT) |
+| Korean | `korean_topik_1` … `korean_topik_6` | jemdiggity/hanja-wordlist Korean Vocab 6000 TSV |
+| Spanish | `spanish_pcic_a1` … `spanish_pcic_c2` | doozan/spanish_data frequency.csv (CC-BY-4.0) |
+
+**word_id rules:**
+- Chinese: `slugify(numeric_pinyin)` (ASCII pinyin, e.g. `ai4_hao4`)
+- English/Japanese: `slugify(english_meaning)` with dedup counter on collision
+- Korean: `k_{rank:04d}` (sequential — hangul can't be slugified)
+- Spanish: `es_{rank:05d}` (sequential — accented chars drop from slugify)
+
+**`frequency_rank` column:** nullable `INTEGER` on `corpus`, populated by all Stage 1 importers as the word's position within its source list. Added via a one-time migration in `init_db()`.
+
+**Chinese full-replace:** `import_chinese.py` requires `--confirm` to delete existing `chinese_hsk*` rows (corpus + user_progress) before re-importing. Dry-run without the flag shows current row counts.
 
 ## Adding a new topic
 
