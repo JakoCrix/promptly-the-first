@@ -1,8 +1,11 @@
+import logging
 import os
 import random
 import re
 import sqlite3
 from datetime import datetime
+
+log = logging.getLogger(__name__)
 
 from core.config import DATA_DIR, DB_PATH, NEVER_SEEN_SECONDS, RETIREMENT_THRESHOLD
 
@@ -77,12 +80,24 @@ def init_db() -> None:
                 topic       TEXT PRIMARY KEY,
                 description TEXT NOT NULL DEFAULT ''
             );
+
+            CREATE TABLE IF NOT EXISTS sentence_cache (
+                chat_id       INTEGER NOT NULL,
+                topic         TEXT    NOT NULL,
+                word_id       TEXT    NOT NULL,
+                generated_for TEXT    NOT NULL,
+                sentence      TEXT    NOT NULL,
+                PRIMARY KEY (chat_id, topic, word_id, generated_for)
+            );
         """)
         conn.commit()
 
         # One-time migration: move data from old `words` table into corpus + user_progress.
         # SQLite FK enforcement is OFF by default, so DROP TABLE words succeeds even though
         # history rows may reference it. History rows are re-anchored to user_progress after migration.
+        # Snapshot existing tables BEFORE the CREATE TABLE IF NOT EXISTS block above.
+        # Migration guards below check old schema state; re-querying after executescript
+        # would falsely detect newly created tables as pre-existing.
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "words" in tables:
             word_cols = {r[1] for r in conn.execute("PRAGMA table_info(words)")}
@@ -97,6 +112,26 @@ def init_db() -> None:
                 DROP TABLE words;
             """)
             conn.commit()
+
+        # Migrate sentence_cache if generated_for is not part of the primary key.
+        # The table is pure ephemeral cache so dropping it is safe.
+        if "sentence_cache" in tables:
+            old_pk_cols = {
+                r[1] for r in conn.execute("PRAGMA table_info(sentence_cache)") if r[5] > 0
+            }
+            if "generated_for" not in old_pk_cols:
+                conn.executescript("""
+                    DROP TABLE sentence_cache;
+                    CREATE TABLE sentence_cache (
+                        chat_id       INTEGER NOT NULL,
+                        topic         TEXT    NOT NULL,
+                        word_id       TEXT    NOT NULL,
+                        generated_for TEXT    NOT NULL,
+                        sentence      TEXT    NOT NULL,
+                        PRIMARY KEY (chat_id, topic, word_id, generated_for)
+                    );
+                """)
+                conn.commit()
     finally:
         conn.close()
 
@@ -153,6 +188,19 @@ def get_word(chat_id: int, topic: str, word_id: str) -> dict | None:
         conn.close()
 
 
+def _resolve_topic(conn: sqlite3.Connection, chat_id: int) -> str | None:
+    row = conn.execute(
+        "SELECT active_topic FROM user_settings WHERE chat_id = ?",
+        (chat_id,),
+    ).fetchone()
+    if row:
+        return row["active_topic"]
+    first = conn.execute(
+        "SELECT topic FROM corpus ORDER BY topic LIMIT 1",
+    ).fetchone()
+    return first["topic"] if first else None
+
+
 def _elapsed_seconds(word: dict, now: datetime) -> float:
     if word["last_seen"] is None:
         return float(NEVER_SEEN_SECONDS)
@@ -167,19 +215,9 @@ def _weight(word: dict, now: datetime) -> float:
 def pick_word(chat_id: int) -> dict | None:
     conn = _get_conn()
     try:
-        row = conn.execute(
-            "SELECT active_topic FROM user_settings WHERE chat_id = ?",
-            (chat_id,),
-        ).fetchone()
-        topic = row["active_topic"] if row else None
-
+        topic = _resolve_topic(conn, chat_id)
         if topic is None:
-            first = conn.execute(
-                "SELECT topic FROM corpus ORDER BY topic LIMIT 1",
-            ).fetchone()
-            if first is None:
-                return None
-            topic = first["topic"]
+            return None
 
         rows = conn.execute(
             "SELECT c.word_id, c.topic, c.word, c.hint, "
@@ -200,6 +238,96 @@ def pick_word(chat_id: int) -> dict | None:
     now = datetime.now()
     weights = [_weight(w, now) for w in eligible]
     return random.choices(eligible, weights=weights, k=1)[0]
+
+
+def pick_n_words(chat_id: int, n: int) -> list[dict]:
+    """Return up to n distinct eligible words sampled without replacement, by weight."""
+    conn = _get_conn()
+    try:
+        topic = _resolve_topic(conn, chat_id)
+        if topic is None:
+            return []
+
+        rows = conn.execute(
+            "SELECT c.word_id, c.topic, c.word, c.hint, "
+            "COALESCE(up.mastery_score, 0) AS mastery_score, up.last_seen "
+            "FROM corpus c "
+            "LEFT JOIN user_progress up "
+            "    ON c.topic = up.topic AND c.word_id = up.word_id AND up.chat_id = ? "
+            "WHERE c.topic = ? "
+            "  AND COALESCE(up.mastery_score, 0) < ?",
+            (chat_id, topic, RETIREMENT_THRESHOLD),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return []
+    pool = [_row_to_dict(r) for r in rows]
+    now = datetime.now()
+    pool_weights = [_weight(w, now) for w in pool]
+    n = min(n, len(pool))
+    selected = []
+    while len(selected) < n:
+        idx = random.choices(range(len(pool)), weights=pool_weights, k=1)[0]
+        selected.append(pool.pop(idx))
+        pool_weights.pop(idx)
+    return selected
+
+
+def get_retired_words(chat_id: int, topic: str, limit: int = 10) -> list[str]:
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT c.word FROM corpus c "
+            "JOIN user_progress up ON c.topic = up.topic AND c.word_id = up.word_id "
+            "WHERE up.chat_id = ? AND c.topic = ? AND up.mastery_score >= ? "
+            "ORDER BY RANDOM() LIMIT ?",
+            (chat_id, topic, RETIREMENT_THRESHOLD, limit),
+        ).fetchall()
+        return [r["word"] for r in rows]
+    finally:
+        conn.close()
+
+
+def get_cached_sentence(chat_id: int, topic: str, word_id: str, date: str) -> str | None:
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT sentence FROM sentence_cache "
+            "WHERE chat_id = ? AND topic = ? AND word_id = ? AND generated_for = ?",
+            (chat_id, topic, word_id, date),
+        ).fetchone()
+        return row["sentence"] if row else None
+    finally:
+        conn.close()
+
+
+def purge_old_cached_sentences(before_date: str) -> int:
+    """Delete sentence_cache rows older than before_date (YYYY-MM-DD). Returns deleted row count."""
+    conn = _get_conn()
+    try:
+        cursor = conn.execute(
+            "DELETE FROM sentence_cache WHERE generated_for < ?",
+            (before_date,),
+        )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def store_cached_sentence(chat_id: int, topic: str, word_id: str, sentence: str, date: str) -> None:
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO sentence_cache (chat_id, topic, word_id, sentence, generated_for) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (chat_id, topic, word_id, sentence, date),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def slugify(text: str) -> str:
@@ -231,8 +359,17 @@ def get_word_sample(chat_id: int, topic: str, n: int = 15) -> list[dict]:
         conn.close()
 
 
+_MAX_CALLBACK_BYTES = 64
+
 def insert_word(chat_id: int, topic: str, word: str) -> bool:
     word_id = slugify(word)
+    # "forgot" is the longer of the two action prefixes — use it for the worst-case check.
+    if len(f"forgot:{chat_id}:{topic}:{word_id}".encode()) > _MAX_CALLBACK_BYTES:
+        log.warning(
+            "insert_word: callback_data would exceed 64 bytes for word_id='%s' topic='%s' — skipping",
+            word_id, topic,
+        )
+        return False
     conn = _get_conn()
     try:
         cursor = conn.execute(

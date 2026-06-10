@@ -22,18 +22,6 @@ from core.vocab import init_db, set_active_topic
 # Built-in seed dictionaries — seeded for every user in ALLOWED_CHAT_IDS.
 # Word IDs must be ASCII (they appear in Telegram callback_data).
 SEED_DATA = {
-    "chinese": [
-        ("ni_hao",   "你好"),
-        ("xie_xie",  "谢谢"),
-        ("shui",     "水"),
-        ("shu",      "书"),
-        ("mao",      "猫"),
-        ("gou",      "狗"),
-        ("chi",      "吃"),
-        ("da",       "大"),
-        ("xiao",     "小"),
-        ("peng_you", "朋友"),
-    ],
     "zoo_animals": [
         ("tapir",     "tapir"),
         ("okapi",     "okapi"),
@@ -126,7 +114,6 @@ def migrate_vocab_files(conn: sqlite3.Connection) -> tuple[list[str], dict[int, 
 
 TOPIC_DESCRIPTIONS = {
     "zoo_animals": "Common animals found in a zoo, suitable for intermediate English vocabulary.",
-    "chinese":     "Everyday Mandarin Chinese words and phrases, written in pinyin with English translations.",
     "vegetables":  "Common vegetables, suitable for beginner English vocabulary.",
 }
 
