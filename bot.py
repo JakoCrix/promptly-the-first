@@ -70,7 +70,7 @@ async def start_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
         "I'll send you vocabulary prompts throughout the day — just tap ✅ Known or ❌ Forgot on each one.\n\n"
         "Commands:\n"
         "/schedule — see today's prompt times and which have already fired\n"
-        "/topic — see or switch your active vocabulary topic. Type /topic <name> to switch to a different topic.\n"
+        "/topic — browse and switch your active vocabulary topic\n"
         "/test — send a random card right now. Type /test <word_id> to test a specific word.",
         parse_mode=None,
     )
@@ -99,18 +99,102 @@ async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await update.message.reply_text(header + "\n" + "\n".join(lines))
 
 
+_TOPIC_FLAGS = {
+    "chinese": "🇨🇳",
+    "english": "🇬🇧",
+    "japanese": "🇯🇵",
+    "korean": "🇰🇷",
+    "spanish": "🇪🇸",
+}
+
+_MISC_TOPIC_LABELS = {
+    "vegetables": "🥦 Vegetables",
+    "zoo_animals": "🦁 Zoo Animals",
+}
+
+_LANG_PREFIXES = frozenset(_TOPIC_FLAGS)
+
+
+def _topic_label(topic: str) -> str:
+    if topic in _MISC_TOPIC_LABELS:
+        return _MISC_TOPIC_LABELS[topic]
+    parts = topic.split("_")
+    lang = parts[0]
+    flag = _TOPIC_FLAGS.get(lang, "")
+    if topic == "english_ngsl":
+        return f"{flag} NGSL"
+    if lang == "chinese":       # chinese_hsk_1
+        return f"{flag} HSK {parts[-1]}"
+    if lang == "japanese":      # japanese_jlpt_n5
+        return f"{flag} {parts[-1].upper()}"
+    if lang == "korean":        # korean_topik_1
+        return f"{flag} TOPIK {parts[-1]}"
+    if lang == "spanish":       # spanish_pcic_a1
+        return f"{flag} {parts[-1].upper()}"
+    return topic.replace("_", " ").title()
+
+
+def _build_topic_keyboard(topics: list[str], active: str | None, chat_id: int) -> InlineKeyboardMarkup:
+    lang_topics = [t for t in topics if t.split("_")[0] in _LANG_PREFIXES]
+    other_topics = [t for t in topics if t.split("_")[0] not in _LANG_PREFIXES]
+
+    groups: dict[str, list[str]] = {}
+    for t in lang_topics:
+        lang = t.split("_")[0]
+        if lang not in groups:
+            groups[lang] = []
+        groups[lang].append(t)
+
+    rows = []
+    for group in groups.values():
+        for i in range(0, len(group), 4):
+            rows.append([
+                InlineKeyboardButton(
+                    ("✓ " if t == active else "") + _topic_label(t),
+                    callback_data=f"topic:{chat_id}:{t}",
+                )
+                for t in group[i:i + 4]
+            ])
+
+    if other_topics:
+        others_label = "✓ ⋯ Others" if active in other_topics else "⋯ Others"
+        rows.append([InlineKeyboardButton(others_label, callback_data=f"topic_others:{chat_id}")])
+
+    return InlineKeyboardMarkup(rows)
+
+
+def _build_others_keyboard(other_topics: list[str], active: str | None, chat_id: int) -> InlineKeyboardMarkup:
+    rows = []
+    for i in range(0, len(other_topics), 3):
+        rows.append([
+            InlineKeyboardButton(
+                ("✓ " if t == active else "") + _topic_label(t),
+                callback_data=f"topic:{chat_id}:{t}",
+            )
+            for t in other_topics[i:i + 3]
+        ])
+    rows.append([InlineKeyboardButton("← Back", callback_data=f"topic_back:{chat_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
 async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     if not is_registered(chat_id):
         return
 
     available = list_topics(chat_id)
+    current = get_active_topic(chat_id) or (available[0] if available else None)
 
     if not context.args:
-        current = get_active_topic(chat_id) or (available[0] if available else "none")
-        topics_str = ", ".join(available) if available else "none"
+        if not available:
+            await update.message.reply_text("No topics available yet.")
+            return
+        keyboard = _build_topic_keyboard(available, current, chat_id)
+        active_label = _topic_label(current) if current else "none"
         await update.message.reply_text(
-            f"Active topic: {current}\nAvailable: {topics_str}"
+            f"Active: <b>{active_label}</b>\n\nChoose a topic:",
+            reply_markup=keyboard,
+            parse_mode="HTML",
         )
         return
 
@@ -124,7 +208,82 @@ async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     set_active_topic(chat_id, match)
-    await update.message.reply_text(f"Switched to topic: {match}")
+    await update.message.reply_text(f"Switched to: <b>{_topic_label(match)}</b>", parse_mode="HTML")
+
+
+async def topic_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    parts = query.data.split(":", 2)
+    if len(parts) != 3:
+        await query.answer()
+        return
+    _, chat_id_str, topic = parts
+    try:
+        chat_id = int(chat_id_str)
+    except ValueError:
+        await query.answer()
+        return
+    if not is_registered(chat_id) or update.effective_chat.id != chat_id:
+        await query.answer()
+        return
+
+    available = list_topics(chat_id)
+    if topic not in available:
+        await query.answer("Topic not found.", show_alert=True)
+        return
+
+    set_active_topic(chat_id, topic)
+    label = _topic_label(topic)
+    await query.answer(f"Switched to {label}")
+
+    keyboard = _build_topic_keyboard(available, topic, chat_id)
+    await query.edit_message_text(
+        f"Active: <b>{label}</b>\n\nChoose a topic:",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+
+async def topic_others_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    try:
+        chat_id = int(query.data.split(":", 1)[1])
+    except (IndexError, ValueError):
+        await query.answer()
+        return
+    if not is_registered(chat_id) or update.effective_chat.id != chat_id:
+        await query.answer()
+        return
+
+    await query.answer()
+    available = list_topics(chat_id)
+    current = get_active_topic(chat_id)
+    other_topics = [t for t in available if t.split("_")[0] not in _LANG_PREFIXES]
+    keyboard = _build_others_keyboard(other_topics, current, chat_id)
+    await query.edit_message_text("Choose a topic:", reply_markup=keyboard)
+
+
+async def topic_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    try:
+        chat_id = int(query.data.split(":", 1)[1])
+    except (IndexError, ValueError):
+        await query.answer()
+        return
+    if not is_registered(chat_id) or update.effective_chat.id != chat_id:
+        await query.answer()
+        return
+
+    await query.answer()
+    available = list_topics(chat_id)
+    current = get_active_topic(chat_id)
+    keyboard = _build_topic_keyboard(available, current, chat_id)
+    active_label = _topic_label(current) if current else "none"
+    await query.edit_message_text(
+        f"Active: <b>{active_label}</b>\n\nChoose a topic:",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
 
 
 async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -233,6 +392,15 @@ def main() -> None:
     app.add_handler(CommandHandler("schedule", schedule_command))
     app.add_handler(CommandHandler("topic", topic_command))
     app.add_handler(CommandHandler("test", test_command))
+    app.add_handler(
+        CallbackQueryHandler(topic_others_handler, pattern=r"^topic_others:\d+$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(topic_back_handler, pattern=r"^topic_back:\d+$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(topic_select_handler, pattern=r"^topic:\d+:.+$")
+    )
     app.add_handler(
         CallbackQueryHandler(feedback_handler, pattern=r"^(known|forgot):\d+:[^:]+:.+$")
     )

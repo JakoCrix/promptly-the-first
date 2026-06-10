@@ -13,7 +13,7 @@
 CREATE TEMP TABLE _cfg(chat_id INTEGER, topic TEXT, mastery_score INTEGER);
 INSERT INTO _cfg VALUES (
     5419998958,    -- Andrew: 5419998958 
-    'chinese_hsk1',
+    'chinese_hsk_1',
     10             -- 10 = fully retired; 0 = reset to unseen
 );
 
