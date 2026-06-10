@@ -6,11 +6,11 @@ from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
 
-from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN, MIN_RETIRED_FOR_WEAVING
+from core.config import BOT_TOKEN, MIN_RETIRED_FOR_WEAVING
 from core.persistence import mark_slot_fired
-from core.scheduler import MELBOURNE_TZ, get_schedule_state, wire_scheduler
+from core.scheduler import MELBOURNE_TZ, get_schedule_state, wire_new_user, wire_scheduler
 from core.suggest import format_sentence_words, generate_sentence
-from core.vocab import get_active_topic, get_cached_sentence, get_retired_words, get_topic_description, get_word, init_db, list_topics, pick_n_words, pick_word, record_feedback, set_active_topic, store_cached_sentence
+from core.vocab import get_active_topic, get_cached_sentence, get_retired_words, get_topic_description, get_word, init_db, is_registered, list_topics, pick_n_words, pick_word, record_feedback, register_user, set_active_topic, store_cached_sentence
 
 
 async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -52,15 +52,18 @@ async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
     ts: datetime = context.job.data
-    context.bot_data.setdefault("today_fired", set()).add(ts)
+    context.bot_data.setdefault("today_fired", {}).setdefault(chat_id, set()).add(ts)
     try:
-        mark_slot_fired(ts)
+        mark_slot_fired(chat_id, ts)
     except Exception:
-        logging.exception("Failed to persist fired slot %s — in-memory state is current", ts)
+        logging.exception("Failed to persist fired slot %s for chat %s — in-memory state is current", ts, chat_id)
 
 
 async def start_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_chat.id not in ALLOWED_CHAT_IDS:
+    if not is_registered(update.effective_chat.id):
+        await update.message.reply_text(
+            "👋 Hi! To join Promptly, use /register <invite code>."
+        )
         return
     await update.message.reply_text(
         "👋 Welcome to Promptly!\n\n"
@@ -75,15 +78,15 @@ async def start_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
-    if chat_id not in ALLOWED_CHAT_IDS:
+    if not is_registered(chat_id):
         return
 
-    today_slots = context.bot_data.get("today_slots")
+    today_slots = context.bot_data.get("today_slots", {}).get(chat_id)
     if not today_slots:
         await update.message.reply_text("No schedule available yet.")
         return
 
-    fired_times = context.bot_data.get("today_fired", set())
+    fired_times = context.bot_data.get("today_fired", {}).get(chat_id, set())
     schedule = get_schedule_state(today_slots, fired_times)
 
     lines = []
@@ -98,7 +101,7 @@ async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
-    if chat_id not in ALLOWED_CHAT_IDS:
+    if not is_registered(chat_id):
         return
 
     available = list_topics(chat_id)
@@ -126,7 +129,7 @@ async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
-    if chat_id not in ALLOWED_CHAT_IDS:
+    if not is_registered(chat_id):
         return
 
     if context.args:
@@ -174,6 +177,23 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
 
 
+async def register_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if is_registered(chat_id):
+        await update.message.reply_text("You're already registered!")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /register <invite code>")
+        return
+    if register_user(chat_id, context.args[0]):
+        wire_new_user(context.application, send_card, chat_id)
+        await update.message.reply_text(
+            "You're registered! Your first vocabulary cards are scheduled for today."
+        )
+    else:
+        await update.message.reply_text("Invalid invite code.")
+
+
 async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -185,7 +205,7 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         chat_id = int(chat_id_str)
     except ValueError:
         return
-    if chat_id not in ALLOWED_CHAT_IDS or update.effective_chat.id != chat_id:
+    if not is_registered(chat_id) or update.effective_chat.id != chat_id:
         return
     record_feedback(chat_id, topic, word_id, result)
     await query.edit_message_reply_markup(reply_markup=None)
@@ -209,6 +229,7 @@ def main() -> None:
         .build()
     )
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("register", register_command))
     app.add_handler(CommandHandler("schedule", schedule_command))
     app.add_handler(CommandHandler("topic", topic_command))
     app.add_handler(CommandHandler("test", test_command))
