@@ -17,9 +17,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ContextTypes
 
-from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN, MIN_RETIRED_FOR_WEAVING
+from core.config import BOT_TOKEN, MIN_RETIRED_FOR_WEAVING
 from core.suggest import format_sentence_words, generate_sentence
-from core.vocab import get_active_topic, get_retired_words, get_topic_description, get_word, pick_word, record_feedback
+from core.vocab import get_active_topic, get_allowed_chat_ids, get_retired_words, get_topic_description, get_word, is_registered, pick_word, record_feedback
 
 
 def resolve_word(chat_id: int, word_id: str | None) -> dict | None:
@@ -42,8 +42,9 @@ async def main() -> None:
     if not BOT_TOKEN:
         print("ERROR: BOT_TOKEN is not set in .env")
         return
-    if not ALLOWED_CHAT_IDS:
-        print("ERROR: CHAT_IDS is not set in .env")
+    chat_ids = get_allowed_chat_ids()
+    if not chat_ids:
+        print("ERROR: No registered users in DB — run /register first or run migrate_to_sqlite.py")
         return
 
     word_id = sys.argv[1] if len(sys.argv) > 1 else None
@@ -60,7 +61,7 @@ async def main() -> None:
             chat_id = int(chat_id_str)
         except ValueError:
             return
-        if chat_id not in ALLOWED_CHAT_IDS:
+        if not is_registered(chat_id):
             return
         record_feedback(chat_id, topic, wid, result)
         await query.edit_message_reply_markup(reply_markup=None)
@@ -79,7 +80,7 @@ async def main() -> None:
         print(f"Connected as @{me.username}")
 
         sent = False
-        for chat_id in ALLOWED_CHAT_IDS:
+        for chat_id in chat_ids:
             word = resolve_word(chat_id, word_id)
             if word is None:
                 continue

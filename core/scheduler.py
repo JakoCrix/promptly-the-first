@@ -4,8 +4,9 @@ import random
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from core.config import ALLOWED_CHAT_IDS, DAILY_SLOTS, MIN_RETIRED_FOR_WEAVING, WINDOW_END_HOUR, WINDOW_START_HOUR
+from core.config import DAILY_SLOTS, MIN_RETIRED_FOR_WEAVING, WINDOW_END_HOUR, WINDOW_START_HOUR
 from core.persistence import load_today_schedule, save_schedule
+from core.vocab import get_allowed_chat_ids
 
 log = logging.getLogger(__name__)
 
@@ -55,20 +56,19 @@ def get_schedule_state(
     ]
 
 
-def _schedule_day(app, send_card_fn, slots: list[datetime], fired: set[datetime]) -> None:
+def _schedule_user_day(app, send_card_fn, chat_id: int, slots: list[datetime], fired: set[datetime]) -> None:
     now = datetime.now(tz=MELBOURNE_TZ)
-    app.bot_data["today_slots"] = slots
-    app.bot_data["today_fired"] = fired
+    app.bot_data.setdefault("today_slots", {})[chat_id] = slots
+    app.bot_data.setdefault("today_fired", {})[chat_id] = set(fired)
     for ts in slots:
         if ts not in fired and ts > now:
-            for chat_id in ALLOWED_CHAT_IDS:
-                app.job_queue.run_once(
-                    send_card_fn,
-                    when=ts,
-                    chat_id=chat_id,
-                    name=f"card_{chat_id}_{ts.isoformat()}",
-                    data=ts,
-                )
+            app.job_queue.run_once(
+                send_card_fn,
+                when=ts,
+                chat_id=chat_id,
+                name=f"card_{chat_id}_{ts.isoformat()}",
+                data=ts,
+            )
 
 
 async def _prefill_sentence_cache() -> None:
@@ -105,7 +105,8 @@ async def _prefill_sentence_cache() -> None:
 
     tasks = []
     target = DAILY_SLOTS * 2
-    for chat_id in ALLOWED_CHAT_IDS:
+    allowed = get_allowed_chat_ids()
+    for chat_id in allowed:
         for word in pick_n_words(chat_id, target):
             description = get_topic_description(word["topic"])
             retired = get_retired_words(chat_id, word["topic"])
@@ -113,7 +114,7 @@ async def _prefill_sentence_cache() -> None:
             tasks.append(_generate_and_store(chat_id, word, description, retired, highlight_retired))
 
     await asyncio.gather(*tasks)
-    log.info("sentence cache prefilled for %d chat(s)", len(ALLOWED_CHAT_IDS))
+    log.info("sentence cache prefilled for %d chat(s)", len(allowed))
 
 
 async def _startup_prefill(context) -> None:
@@ -123,24 +124,36 @@ async def _startup_prefill(context) -> None:
 async def _midnight_callback(context) -> None:
     send_card_fn = context.application.bot_data["send_card_fn"]
     now = datetime.now(tz=MELBOURNE_TZ)
+    for chat_id in get_allowed_chat_ids():
+        slots = generate_daily_timestamps(now)
+        fired: set[datetime] = set()
+        save_schedule(chat_id, slots, fired)
+        _schedule_user_day(context.application, send_card_fn, chat_id, slots, fired)
+    await _prefill_sentence_cache()
+
+
+def wire_new_user(app, send_card_fn, chat_id: int) -> None:
+    """Generate and register today's schedule for a newly registered user."""
+    now = datetime.now(tz=MELBOURNE_TZ)
     slots = generate_daily_timestamps(now)
     fired: set[datetime] = set()
-    save_schedule(slots, fired)
-    await _prefill_sentence_cache()
-    _schedule_day(context.application, send_card_fn, slots, fired)
+    save_schedule(chat_id, slots, fired)
+    _schedule_user_day(app, send_card_fn, chat_id, slots, fired)
 
 
 def wire_scheduler(app, send_card_fn) -> None:
     app.bot_data["send_card_fn"] = send_card_fn
+    app.bot_data["today_slots"] = {}
+    app.bot_data["today_fired"] = {}
 
     now = datetime.now(tz=MELBOURNE_TZ)
-    slots, fired = load_today_schedule()
-    if slots is None:
-        slots = generate_daily_timestamps(now)
-        fired = set()
-        save_schedule(slots, fired)
-
-    _schedule_day(app, send_card_fn, slots, fired)
+    for chat_id in get_allowed_chat_ids():
+        slots, fired = load_today_schedule(chat_id)
+        if slots is None:
+            slots = generate_daily_timestamps(now)
+            fired = set()
+            save_schedule(chat_id, slots, fired)
+        _schedule_user_day(app, send_card_fn, chat_id, slots, fired)
 
     app.job_queue.run_once(_startup_prefill, when=5)
     app.job_queue.run_daily(

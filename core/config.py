@@ -5,6 +5,7 @@ load_dotenv()
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 ALLOWED_CHAT_IDS = [int(x) for x in os.environ.get("CHAT_IDS", "").split(",") if x]
+INVITE_CODE = os.environ.get("INVITE_CODE", "")
 VOCAB_TOPIC = os.environ.get("VOCAB_TOPIC", "vocab")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 
@@ -27,5 +28,3 @@ NEVER_SEEN_SECONDS = 7 * 24 * 3600
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is not set — add it to your .env file")
-if not ALLOWED_CHAT_IDS:
-    raise RuntimeError("CHAT_IDS is not set — add comma-separated Telegram chat IDs to your .env file")

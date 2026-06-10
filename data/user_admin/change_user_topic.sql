@@ -2,7 +2,7 @@
 -- Replace the values below before running.
 --
 -- Usage:
---   sqlite3 data/promptly.db < data/change_user_topic.sql
+--   sqlite3 data/promptly.db < data/user_admin/change_user_topic.sql
 --
 -- To find chat IDs and current topics:
 --   SELECT chat_id, active_topic FROM user_settings;

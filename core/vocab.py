@@ -3,11 +3,11 @@ import os
 import random
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
-from core.config import DATA_DIR, DB_PATH, NEVER_SEEN_SECONDS, RETIREMENT_THRESHOLD
+from core.config import ALLOWED_CHAT_IDS, DATA_DIR, DB_PATH, INVITE_CODE, NEVER_SEEN_SECONDS, RETIREMENT_THRESHOLD
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -31,6 +31,8 @@ def init_db() -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     conn = _get_conn()
     try:
+        # Snapshot BEFORE executescript so migration guards reflect pre-existing state.
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS corpus (
                 topic   TEXT NOT NULL,
@@ -70,15 +72,21 @@ def init_db() -> None:
             );
 
             CREATE TABLE IF NOT EXISTS schedule (
+                chat_id   INTEGER NOT NULL,
                 date      TEXT    NOT NULL,
                 slot_time TEXT    NOT NULL,
                 fired     INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (date, slot_time)
+                PRIMARY KEY (chat_id, date, slot_time)
             );
 
             CREATE TABLE IF NOT EXISTS topics (
                 topic       TEXT PRIMARY KEY,
                 description TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS users (
+                chat_id       INTEGER PRIMARY KEY,
+                registered_at TEXT    NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS sentence_cache (
@@ -92,13 +100,18 @@ def init_db() -> None:
         """)
         conn.commit()
 
-        # One-time migration: move data from old `words` table into corpus + user_progress.
+        # Seed users table from ALLOWED_CHAT_IDS so existing users aren't affected.
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+        for cid in ALLOWED_CHAT_IDS:
+            conn.execute(
+                "INSERT OR IGNORE INTO users (chat_id, registered_at) VALUES (?, ?)",
+                (cid, now_iso),
+            )
+        conn.commit()
+
+        # One-time migrations — guards use the pre-executescript snapshot above.
         # SQLite FK enforcement is OFF by default, so DROP TABLE words succeeds even though
         # history rows may reference it. History rows are re-anchored to user_progress after migration.
-        # Snapshot existing tables BEFORE the CREATE TABLE IF NOT EXISTS block above.
-        # Migration guards below check old schema state; re-querying after executescript
-        # would falsely detect newly created tables as pre-existing.
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "words" in tables:
             word_cols = {r[1] for r in conn.execute("PRAGMA table_info(words)")}
             if "hint" not in word_cols:
@@ -112,6 +125,23 @@ def init_db() -> None:
                 DROP TABLE words;
             """)
             conn.commit()
+
+        # Migrate schedule table to per-user schema (add chat_id to PK).
+        # Schedule data is ephemeral — drop and recreate if the old schema is detected.
+        if "schedule" in tables:
+            sched_cols = {r[1] for r in conn.execute("PRAGMA table_info(schedule)")}
+            if "chat_id" not in sched_cols:
+                conn.executescript("""
+                    DROP TABLE schedule;
+                    CREATE TABLE schedule (
+                        chat_id   INTEGER NOT NULL,
+                        date      TEXT    NOT NULL,
+                        slot_time TEXT    NOT NULL,
+                        fired     INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (chat_id, date, slot_time)
+                    );
+                """)
+                conn.commit()
 
         # Migrate sentence_cache if generated_for is not part of the primary key.
         # The table is pure ephemeral cache so dropping it is safe.
@@ -375,6 +405,41 @@ def insert_word(chat_id: int, topic: str, word: str) -> bool:
         cursor = conn.execute(
             "INSERT OR IGNORE INTO corpus (topic, word_id, word) VALUES (?, ?, ?)",
             (topic, word_id, word),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_allowed_chat_ids() -> list[int]:
+    conn = _get_conn()
+    try:
+        rows = conn.execute("SELECT chat_id FROM users").fetchall()
+        return [r["chat_id"] for r in rows]
+    finally:
+        conn.close()
+
+
+def is_registered(chat_id: int) -> bool:
+    conn = _get_conn()
+    try:
+        return conn.execute(
+            "SELECT 1 FROM users WHERE chat_id = ?", (chat_id,)
+        ).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def register_user(chat_id: int, code: str) -> bool:
+    """Register a new user if code matches INVITE_CODE. Returns True if newly registered."""
+    if not INVITE_CODE or code != INVITE_CODE:
+        return False
+    conn = _get_conn()
+    try:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO users (chat_id, registered_at) VALUES (?, ?)",
+            (chat_id, datetime.now(tz=timezone.utc).isoformat()),
         )
         conn.commit()
         return cursor.rowcount > 0
