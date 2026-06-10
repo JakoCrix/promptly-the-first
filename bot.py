@@ -6,11 +6,11 @@ from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
 
-from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN
+from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN, MIN_RETIRED_FOR_WEAVING
 from core.persistence import mark_slot_fired
 from core.scheduler import MELBOURNE_TZ, get_schedule_state, wire_scheduler
-from core.suggest import fetch_suggestions, generate_sentence
-from core.vocab import get_active_topic, get_topic_description, get_word, get_word_sample, init_db, insert_word, list_topics, pick_word, record_feedback, set_active_topic, _slugify
+from core.suggest import format_sentence_words, generate_sentence
+from core.vocab import get_active_topic, get_cached_sentence, get_retired_words, get_topic_description, get_word, init_db, list_topics, pick_n_words, pick_word, record_feedback, set_active_topic, store_cached_sentence
 
 
 async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -19,17 +19,24 @@ async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
     if word is None:
         return
 
-    sentence = None
-    try:
-        description = get_topic_description(word["topic"])
-        sentence = await asyncio.wait_for(
-            asyncio.to_thread(generate_sentence, word["word"], word["topic"], description, word.get("hint")),
-            timeout=5.0,
-        )
-    except asyncio.TimeoutError:
-        logging.debug("generate_sentence timed out for '%s'", word["word"])
-    except Exception:
-        logging.warning("generate_sentence failed for '%s'", word["word"], exc_info=True)
+    today = datetime.now(MELBOURNE_TZ).strftime("%Y-%m-%d")
+    sentence = get_cached_sentence(chat_id, word["topic"], word["id"], today)
+    if sentence is None:
+        retired = get_retired_words(chat_id, word["topic"])
+        highlight_retired = retired if len(retired) >= MIN_RETIRED_FOR_WEAVING else []
+        try:
+            description = get_topic_description(word["topic"])
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(generate_sentence, word["word"], word["topic"], description, word.get("hint"), retired),
+                timeout=15.0,
+            )
+            if raw:
+                sentence = format_sentence_words(raw, word["word"], highlight_retired)
+                store_cached_sentence(chat_id, word["topic"], word["id"], sentence, today)
+        except asyncio.TimeoutError:
+            logging.debug("generate_sentence timed out for '%s'", word["word"])
+        except Exception:
+            logging.warning("generate_sentence failed for '%s'", word["word"], exc_info=True)
 
     hint_line = f"\n<i>{word['hint']}</i>" if word.get("hint") else ""
     text = f"<b>{word['word']}</b>{hint_line}" + (f"\n\n{sentence}" if sentence else "")
@@ -61,7 +68,7 @@ async def start_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
         "Commands:\n"
         "/schedule — see today's prompt times and which have already fired\n"
         "/topic — see or switch your active vocabulary topic. Type /topic <name> to switch to a different topic.\n"
-        "/suggest — get AI-generated word suggestions for your active topic",
+        "/test — send a random card right now. Type /test <word_id> to test a specific word.",
         parse_mode=None,
     )
 
@@ -117,6 +124,56 @@ async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(f"Switched to topic: {match}")
 
 
+async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if chat_id not in ALLOWED_CHAT_IDS:
+        return
+
+    if context.args:
+        topic = get_active_topic(chat_id)
+        if topic is None:
+            await update.message.reply_text("No active topic set. Use /topic <name> to choose one.")
+            return
+        word = get_word(chat_id, topic, context.args[0])
+        if word is None:
+            await update.message.reply_text(f"Word '{context.args[0]}' not found in topic '{topic}'.")
+            return
+        words = [word]
+    else:
+        words = pick_n_words(chat_id, 3)
+        if not words:
+            await update.message.reply_text("No eligible words (all retired, or no active topic).")
+            return
+
+    today = datetime.now(MELBOURNE_TZ).strftime("%Y-%m-%d")
+    for word in words:
+        sentence = get_cached_sentence(chat_id, word["topic"], word["id"], today)
+        if sentence is None:
+            retired = get_retired_words(chat_id, word["topic"])
+            highlight_retired = retired if len(retired) >= MIN_RETIRED_FOR_WEAVING else []
+            try:
+                description = get_topic_description(word["topic"])
+                raw = await asyncio.wait_for(
+                    asyncio.to_thread(generate_sentence, word["word"], word["topic"], description, word.get("hint"), retired),
+                    timeout=15.0,
+                )
+                if raw:
+                    sentence = format_sentence_words(raw, word["word"], highlight_retired)
+                    store_cached_sentence(chat_id, word["topic"], word["id"], sentence, today)
+            except asyncio.TimeoutError:
+                logging.debug("generate_sentence timed out for '%s'", word["word"])
+            except Exception:
+                logging.warning("generate_sentence failed for '%s'", word["word"], exc_info=True)
+
+        hint_line = f"\n<i>{word['hint']}</i>" if word.get("hint") else ""
+        text = f"<b>{word['word']}</b>{hint_line}" + (f"\n\n{sentence}" if sentence else "")
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['topic']}:{word['id']}"),
+            InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['topic']}:{word['id']}"),
+        ]])
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
 async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -133,105 +190,6 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     record_feedback(chat_id, topic, word_id, result)
     await query.edit_message_reply_markup(reply_markup=None)
 
-
-async def _send_next_suggestion(
-    bot,
-    chat_id: int,
-    topic: str,
-    bot_data: dict,
-) -> None:
-    pending = bot_data.get("pending", {}).get(chat_id, [])
-    if not pending:
-        await bot.send_message(chat_id=chat_id, text="All done! No more suggestions.")
-        return
-
-    item = pending[0]
-    word, sentence, word_id = item["word"], item["sentence"], item["word_id"]
-    text = (
-        f"💡 Suggested word: <b>{word}</b>\n"
-        f'"{sentence}"\n\n'
-        f"Add to <i>{topic}</i>?"
-    )
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Yes", callback_data=f"suggest_y:{chat_id}:{topic}:{word_id}"),
-        InlineKeyboardButton("❌ No",  callback_data=f"suggest_n:{chat_id}:{topic}:{word_id}"),
-    ]])
-    await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
-
-
-async def suggest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.effective_chat.id
-    if chat_id not in ALLOWED_CHAT_IDS:
-        return
-
-    topic = get_active_topic(chat_id)
-    if topic is None:
-        await update.message.reply_text("No active topic set. Use /topic <name> to choose one.")
-        return
-
-    await update.message.reply_text(f"Fetching suggestions for <i>{topic}</i>…", parse_mode="HTML")
-
-    description = get_topic_description(topic)
-    sample = get_word_sample(chat_id, topic)
-    existing_words = [w["word"] for w in sample]
-
-    suggestions = fetch_suggestions(topic, description, existing_words)
-    if not suggestions:
-        await update.message.reply_text("Couldn't get suggestions right now. Check your GOOGLE_API_KEY and try again.")
-        return
-
-    pending_list = [
-        {"word": word, "sentence": sentence, "word_id": _slugify(word)}
-        for word, sentence in suggestions
-    ]
-    context.bot_data.setdefault("pending", {})[chat_id] = pending_list
-    await _send_next_suggestion(context.bot, chat_id, topic, context.bot_data)
-
-
-async def suggest_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-
-    parts = query.data.split(":", 3)
-    if len(parts) != 4:
-        return
-    action, chat_id_str, topic, word_id = parts
-    try:
-        chat_id = int(chat_id_str)
-    except ValueError:
-        return
-    if chat_id not in ALLOWED_CHAT_IDS or update.effective_chat.id != chat_id:
-        return
-
-    pending = context.bot_data.get("pending", {}).get(chat_id, [])
-    if not pending or pending[0]["word_id"] != word_id:
-        await query.edit_message_text(
-            "Session expired — run /suggest again to restart.",
-            parse_mode=None,
-        )
-        return
-
-    item = pending.pop(0)
-
-    if action == "suggest_y":
-        stored_word = item["word"].split(" (")[0].strip()
-        added = insert_word(chat_id, topic, stored_word)
-        if added:
-            status = "✅ Added!"
-        else:
-            existing = get_word(chat_id, topic, _slugify(stored_word))
-            if existing and existing["word"].lower() != stored_word.lower():
-                status = f"Skipped — conflicts with existing word '{existing['word']}' (same ID)."
-            else:
-                status = "Already in your deck."
-    else:
-        status = "❌ Skipped."
-
-    await query.edit_message_text(
-        f"{status}\n\n<i>{item['word']}</i>: {item['sentence']}",
-        parse_mode="HTML",
-    )
-    await _send_next_suggestion(context.bot, chat_id, topic, context.bot_data)
 
 
 def main() -> None:
@@ -253,12 +211,9 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("schedule", schedule_command))
     app.add_handler(CommandHandler("topic", topic_command))
-    app.add_handler(CommandHandler("suggest", suggest_command))
+    app.add_handler(CommandHandler("test", test_command))
     app.add_handler(
         CallbackQueryHandler(feedback_handler, pattern=r"^(known|forgot):\d+:[^:]+:.+$")
-    )
-    app.add_handler(
-        CallbackQueryHandler(suggest_callback, pattern=r"^suggest_[yn]:")
     )
     app.run_polling(drop_pending_updates=True)
 

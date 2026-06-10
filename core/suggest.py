@@ -1,10 +1,9 @@
-import json
 import logging
 import re
 
 import google.generativeai as genai
 
-from core.config import GOOGLE_API_KEY, SUGGEST_BATCH_SIZE
+from core.config import GOOGLE_API_KEY, MIN_RETIRED_FOR_WEAVING
 
 log = logging.getLogger(__name__)
 
@@ -12,55 +11,29 @@ genai.configure(api_key=GOOGLE_API_KEY)
 _MODEL = genai.GenerativeModel("gemini-2.5-flash")
 
 
-def fetch_suggestions(topic: str, description: str, existing_words: list[str]) -> list[tuple[str, str]]:
-    """Call Gemini and return up to SUGGEST_BATCH_SIZE (word, sentence) tuples.
-
-    Filters out any suggestions whose word appears in existing_words (case-insensitive).
-    Returns an empty list if the API call or JSON parse fails.
-    """
-
-    existing_lower = {w.lower() for w in existing_words}
-    existing_str = ", ".join(existing_words[:30])
-
-    prompt = (
-        f'You are a vocabulary tutor. Topic: "{topic}".\n'
-        f"Description: {description}\n"
-        f"Existing words (do NOT repeat these): {existing_str}\n\n"
-        f"Suggest {SUGGEST_BATCH_SIZE} new vocabulary words for this topic.\n"
-        "Return ONLY a JSON array of objects, each with \"word\" and \"sentence\" keys.\n"
-        "The sentence should use the word naturally in context.\n"
-        'Example: [{"word": "giraffe", "sentence": "The giraffe stretched its long neck to reach the leaves."}]'
-    )
-
-    try:
-        response = _MODEL.generate_content(prompt)
-        text = response.text.strip()
-        # Strip markdown code fences if present
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-        parsed = json.loads(text)
-    except Exception as exc:
-        log.error("fetch_suggestions failed: %s: %s", type(exc).__name__, exc)
-        return []
-
-    results = []
-    for item in parsed:
-        word = item.get("word", "").strip()
-        sentence = item.get("sentence", "").strip()
-        if word and sentence and word.lower() not in existing_lower:
-            results.append((word, sentence))
-
-    return results
-
-
-def generate_sentence(word: str, topic: str, description: str, hint: str | None = None) -> str | None:
+def generate_sentence(
+    word: str,
+    topic: str,
+    description: str,
+    hint: str | None = None,
+    retired_words: list[str] | None = None,
+) -> str | None:
     """Generate one fresh sentence for a vocab card. Returns None on any failure."""
     hint_line = f'Pronunciation and meaning: "{hint}"\n' if hint else ""
+    retired_line = ""
+    if retired_words and len(retired_words) >= MIN_RETIRED_FOR_WEAVING:
+        retired_line = (
+            f"You may also naturally weave in some of these words the learner has already mastered, "
+            f"if they fit: {', '.join(retired_words)}. "
+            "Do not force them — only include words that belong naturally. "
+            "Prioritise flow over how many you include.\n"
+        )
     prompt = (
         f'Generate exactly one natural example sentence that uses the word or phrase "{word}" '
         f'in the context of the topic "{topic}".\n'
         f"{hint_line}"
         f"Topic description: {description or topic}\n"
+        f"{retired_line}"
         "Return only the sentence itself — no labels, no quotes, no extra text."
     )
     try:
@@ -69,3 +42,28 @@ def generate_sentence(word: str, topic: str, description: str, hint: str | None 
     except Exception as exc:
         log.error("generate_sentence failed: %s: %s", type(exc).__name__, exc)
         return None
+
+
+def format_sentence_words(sentence: str, main_word: str, retired_words: list[str]) -> str:
+    """Underline+bold the main word and underline retired words in a single regex pass."""
+    def _pattern(word: str) -> str:
+        escaped = re.escape(word)
+        return (r'\b' + escaped + r'\b') if word.isascii() else escaped
+
+    # Exclude main word from retired list to prevent double-wrapping.
+    filtered_retired = [w for w in retired_words if w.lower() != main_word.lower()]
+    sorted_retired = sorted(filtered_retired, key=len, reverse=True)
+
+    parts = [f"(?P<main>{_pattern(main_word)})"]
+    if sorted_retired:
+        parts.append("(?P<retired>" + "|".join(_pattern(w) for w in sorted_retired) + ")")
+
+    combined = re.compile("|".join(parts), re.IGNORECASE)
+
+    def _replace(m: re.Match) -> str:
+        return f"<u><b>{m.group()}</b></u>" if m.group("main") else f"<u>{m.group()}</u>"
+
+    result = combined.sub(_replace, sentence)
+    if result == sentence:
+        log.debug("format_sentence_words: no match for '%s' in: %.80s", main_word, sentence)
+    return result

@@ -17,9 +17,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ContextTypes
 
-from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN
-from core.suggest import generate_sentence
-from core.vocab import get_active_topic, get_topic_description, get_word, pick_word, record_feedback
+from core.config import ALLOWED_CHAT_IDS, BOT_TOKEN, MIN_RETIRED_FOR_WEAVING
+from core.suggest import format_sentence_words, generate_sentence
+from core.vocab import get_active_topic, get_retired_words, get_topic_description, get_word, pick_word, record_feedback
 
 
 def resolve_word(chat_id: int, word_id: str | None) -> dict | None:
@@ -85,11 +85,15 @@ async def main() -> None:
                 continue
 
             sentence = None
+            retired = get_retired_words(chat_id, word["topic"])
+            highlight_retired = retired if len(retired) >= MIN_RETIRED_FOR_WEAVING else []
             try:
                 description = get_topic_description(word["topic"])
                 sentence = await asyncio.to_thread(
-                    generate_sentence, word["word"], word["topic"], description, word.get("hint")
+                    generate_sentence, word["word"], word["topic"], description, word.get("hint"), retired
                 )
+                if sentence:
+                    sentence = format_sentence_words(sentence, word["word"], highlight_retired)
             except Exception as e:
                 print(f"  generate_sentence failed: {e} — sending without sentence")
 
