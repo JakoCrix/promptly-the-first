@@ -94,7 +94,6 @@ def main() -> None:
             continue
 
         filtered_rank += 1
-        original_rank = filtered_rank  # track position in the filtered content-word list
         topic = _topic_for_rank(filtered_rank)
         word_id = f"es_{filtered_rank:05d}"
 

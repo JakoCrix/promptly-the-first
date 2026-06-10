@@ -121,6 +121,8 @@ def _topic_label(topic: str) -> str:
     parts = topic.split("_")
     lang = parts[0]
     flag = _TOPIC_FLAGS.get(lang, "")
+    if len(parts) < 2:
+        return topic.replace("_", " ").title()
     if topic == "english_ngsl":
         return f"{flag} NGSL"
     if lang == "chinese":       # chinese_hsk_1
@@ -140,10 +142,7 @@ def _build_topic_keyboard(topics: list[str], active: str | None, chat_id: int) -
 
     groups: dict[str, list[str]] = {}
     for t in lang_topics:
-        lang = t.split("_")[0]
-        if lang not in groups:
-            groups[lang] = []
-        groups[lang].append(t)
+        groups.setdefault(t.split("_")[0], []).append(t)
 
     rows = []
     for group in groups.values():

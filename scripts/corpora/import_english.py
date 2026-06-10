@@ -29,7 +29,6 @@ _DESCRIPTION = (
 
 def main() -> None:
     init_db()
-    conn = _get_conn()
 
     print("Fetching NGSL data...", end=" ", flush=True)
     try:
@@ -39,6 +38,8 @@ def main() -> None:
         print(f"FAILED: {exc}")
         sys.exit(1)
     print("done.")
+
+    conn = _get_conn()
 
     rows = []
     seen_ids: set[str] = set()

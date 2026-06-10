@@ -22,13 +22,11 @@ _BASE_URL = (
     "https://raw.githubusercontent.com/drkameleon/complete-hsk-vocabulary"
     "/main/wordlists/exclusive/new/{level}.json"
 )
-_LEVELS = range(1, 10)  # HSK 3.0: levels 1–9
+_LEVELS = range(1, 8)  # HSK 3.0: source has 7 files; file 7 covers levels 7–9 combined
 
 _DESCRIPTIONS = {
     **{f"chinese_hsk_{i}": f"Mandarin Chinese — HSK 3.0 Level {i}." for i in range(1, 7)},
     "chinese_hsk_7": "Mandarin Chinese — HSK 3.0 Levels 7–9 (advanced, combined in source dataset).",
-    "chinese_hsk_8": "Mandarin Chinese — HSK 3.0 Level 8.",
-    "chinese_hsk_9": "Mandarin Chinese — HSK 3.0 Level 9.",
 }
 
 
