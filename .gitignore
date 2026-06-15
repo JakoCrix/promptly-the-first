@@ -6,8 +6,10 @@ __pycache__/
 .env
 .venv/
 
-# Database (runtime data — not for version control)
+# Database and generated data (runtime — not for version control)
 data/*.db
+data/word_sentences/*
+!data/word_sentences/*.csv
 
 # Tools
 .ruff_cache/
