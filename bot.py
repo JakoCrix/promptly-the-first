@@ -10,7 +10,7 @@ from core.config import BOT_TOKEN, MIN_RETIRED_FOR_WEAVING
 from core.persistence import mark_slot_fired
 from core.scheduler import MELBOURNE_TZ, get_schedule_state, wire_new_user, wire_scheduler
 from core.suggest import format_sentence_words, generate_sentence
-from core.vocab import get_active_topic, get_cached_sentence, get_retired_words, get_topic_description, get_word, init_db, is_registered, list_topics, pick_n_words, pick_word, record_feedback, register_user, set_active_topic, store_cached_sentence
+from core.vocab import get_active_topic, get_cached_sentence, get_pooled_sentence, get_retired_words, get_topic_description, get_word, init_db, is_registered, list_topics, pick_n_words, pick_word, record_feedback, register_user, set_active_topic, store_cached_sentence, store_pooled_sentence
 
 
 async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -24,19 +24,25 @@ async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
     if sentence is None:
         retired = get_retired_words(chat_id, word["topic"])
         highlight_retired = retired if len(retired) >= MIN_RETIRED_FOR_WEAVING else []
-        try:
-            description = get_topic_description(word["topic"])
-            raw = await asyncio.wait_for(
-                asyncio.to_thread(generate_sentence, word["word"], word["topic"], description, word.get("hint"), retired),
-                timeout=15.0,
-            )
-            if raw:
-                sentence = format_sentence_words(raw, word["word"], highlight_retired)
-                store_cached_sentence(chat_id, word["topic"], word["id"], sentence, today)
-        except asyncio.TimeoutError:
-            logging.debug("generate_sentence timed out for '%s'", word["word"])
-        except Exception:
-            logging.warning("generate_sentence failed for '%s'", word["word"], exc_info=True)
+        pooled = get_pooled_sentence(word["topic"], word["id"])
+        if pooled:
+            sentence = format_sentence_words(pooled, word["word"], highlight_retired)
+            store_cached_sentence(chat_id, word["topic"], word["id"], sentence, today)
+        if sentence is None:
+            try:
+                description = get_topic_description(word["topic"])
+                raw = await asyncio.wait_for(
+                    asyncio.to_thread(generate_sentence, word["word"], word["topic"], description, word.get("hint"), retired),
+                    timeout=15.0,
+                )
+                if raw:
+                    sentence = format_sentence_words(raw, word["word"], highlight_retired)
+                    store_cached_sentence(chat_id, word["topic"], word["id"], sentence, today)
+                    store_pooled_sentence(word["topic"], word["id"], raw)
+            except asyncio.TimeoutError:
+                logging.debug("generate_sentence timed out for '%s'", word["word"])
+            except Exception:
+                logging.warning("generate_sentence failed for '%s'", word["word"], exc_info=True)
 
     hint_line = f"\n<i>{word['hint']}</i>" if word.get("hint") else ""
     text = f"<b>{word['word']}</b>{hint_line}" + (f"\n\n{sentence}" if sentence else "")
@@ -312,19 +318,25 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if sentence is None:
             retired = get_retired_words(chat_id, word["topic"])
             highlight_retired = retired if len(retired) >= MIN_RETIRED_FOR_WEAVING else []
-            try:
-                description = get_topic_description(word["topic"])
-                raw = await asyncio.wait_for(
-                    asyncio.to_thread(generate_sentence, word["word"], word["topic"], description, word.get("hint"), retired),
-                    timeout=15.0,
-                )
-                if raw:
-                    sentence = format_sentence_words(raw, word["word"], highlight_retired)
-                    store_cached_sentence(chat_id, word["topic"], word["id"], sentence, today)
-            except asyncio.TimeoutError:
-                logging.debug("generate_sentence timed out for '%s'", word["word"])
-            except Exception:
-                logging.warning("generate_sentence failed for '%s'", word["word"], exc_info=True)
+            pooled = get_pooled_sentence(word["topic"], word["id"])
+            if pooled:
+                sentence = format_sentence_words(pooled, word["word"], highlight_retired)
+                store_cached_sentence(chat_id, word["topic"], word["id"], sentence, today)
+            if sentence is None:
+                try:
+                    description = get_topic_description(word["topic"])
+                    raw = await asyncio.wait_for(
+                        asyncio.to_thread(generate_sentence, word["word"], word["topic"], description, word.get("hint"), retired),
+                        timeout=15.0,
+                    )
+                    if raw:
+                        sentence = format_sentence_words(raw, word["word"], highlight_retired)
+                        store_cached_sentence(chat_id, word["topic"], word["id"], sentence, today)
+                        store_pooled_sentence(word["topic"], word["id"], raw)
+                except asyncio.TimeoutError:
+                    logging.debug("generate_sentence timed out for '%s'", word["word"])
+                except Exception:
+                    logging.warning("generate_sentence failed for '%s'", word["word"], exc_info=True)
 
         hint_line = f"\n<i>{word['hint']}</i>" if word.get("hint") else ""
         text = f"<b>{word['word']}</b>{hint_line}" + (f"\n\n{sentence}" if sentence else "")

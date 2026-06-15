@@ -74,7 +74,7 @@ def _schedule_user_day(app, send_card_fn, chat_id: int, slots: list[datetime], f
 async def _prefill_sentence_cache() -> None:
     # Imported here to avoid circular imports at module load time.
     from core.suggest import format_sentence_words, generate_sentence
-    from core.vocab import get_retired_words, get_topic_description, pick_n_words, purge_old_cached_sentences, store_cached_sentence
+    from core.vocab import get_retired_words, get_topic_description, pick_n_words, purge_old_cached_sentences, store_cached_sentence, store_pooled_sentence
 
     now = datetime.now(MELBOURNE_TZ)
     today = now.strftime("%Y-%m-%d")
@@ -101,6 +101,7 @@ async def _prefill_sentence_cache() -> None:
         if raw:
             sentence = format_sentence_words(raw, word["word"], highlight_retired)
             store_cached_sentence(chat_id, word["topic"], word["id"], sentence, today)
+            store_pooled_sentence(word["topic"], word["id"], raw)
             log.debug("cached '%s': %.60s", word["word"], sentence)
 
     tasks = []

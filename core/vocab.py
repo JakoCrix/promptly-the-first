@@ -97,6 +97,15 @@ def init_db() -> None:
                 sentence      TEXT    NOT NULL,
                 PRIMARY KEY (chat_id, topic, word_id, generated_for)
             );
+
+            CREATE TABLE IF NOT EXISTS word_sentences (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic    TEXT NOT NULL,
+                word_id  TEXT NOT NULL,
+                sentence TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_word_sentences_lookup
+                ON word_sentences (topic, word_id);
         """)
         conn.commit()
 
@@ -363,6 +372,47 @@ def store_cached_sentence(chat_id: int, topic: str, word_id: str, sentence: str,
             (chat_id, topic, word_id, sentence, date),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+_POOLED_SENTENCE_CAP = 10
+
+
+def store_pooled_sentence(topic: str, word_id: str, sentence: str) -> None:
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO word_sentences (topic, word_id, sentence) VALUES (?, ?, ?)",
+            (topic, word_id, sentence),
+        )
+        conn.execute(
+            """
+            DELETE FROM word_sentences
+            WHERE topic = ? AND word_id = ?
+              AND id NOT IN (
+                  SELECT id FROM word_sentences
+                  WHERE topic = ? AND word_id = ?
+                  ORDER BY id DESC
+                  LIMIT ?
+              )
+            """,
+            (topic, word_id, topic, word_id, _POOLED_SENTENCE_CAP),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_pooled_sentence(topic: str, word_id: str) -> str | None:
+    """Return a random pre-generated sentence from the word_sentences bank, or None if empty."""
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT sentence FROM word_sentences WHERE topic = ? AND word_id = ? ORDER BY RANDOM() LIMIT 1",
+            (topic, word_id),
+        ).fetchone()
+        return row["sentence"] if row else None
     finally:
         conn.close()
 

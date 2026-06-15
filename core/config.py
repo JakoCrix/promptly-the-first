@@ -8,6 +8,7 @@ ALLOWED_CHAT_IDS = [int(x) for x in os.environ.get("CHAT_IDS", "").split(",") if
 INVITE_CODE = os.environ.get("INVITE_CODE", "")
 VOCAB_TOPIC = os.environ.get("VOCAB_TOPIC", "vocab")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 # Minimum retired words needed before asking Gemini to weave them into a sentence.
 # Below this, the prompt stays single-word to avoid thin or awkward context.
