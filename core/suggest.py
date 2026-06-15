@@ -3,12 +3,12 @@ import re
 
 import google.generativeai as genai
 
-from core.config import GOOGLE_API_KEY, MIN_RETIRED_FOR_WEAVING
+from core.config import GEMINI_MODEL, GOOGLE_API_KEY, MIN_RETIRED_FOR_WEAVING
 
 log = logging.getLogger(__name__)
 
 genai.configure(api_key=GOOGLE_API_KEY)
-_MODEL = genai.GenerativeModel("gemini-2.5-flash")
+_MODEL = genai.GenerativeModel(GEMINI_MODEL)
 
 
 def generate_sentence(

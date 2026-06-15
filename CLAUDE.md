@@ -24,9 +24,10 @@ BOT_TOKEN=<telegram-bot-token>
 CHAT_IDS=<comma-separated-chat-ids>
 GOOGLE_API_KEY=<google-gemini-api-key>
 INVITE_CODE=<invite-code-for-self-registration>
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
-`CHAT_IDS` seeds the `users` table on startup so existing users aren't prompted to re-register. `INVITE_CODE` is required for `/register` to work. `VOCAB_TOPIC` is a legacy env var used only by the migration script — omit for new setups.
+`CHAT_IDS` seeds the `users` table on startup so existing users aren't prompted to re-register. `INVITE_CODE` is required for `/register` to work. `GEMINI_MODEL` defaults to `gemini-2.5-flash` if omitted. `VOCAB_TOPIC` is a legacy env var used only by the migration script — omit for new setups.
 
 ## Manual test scripts
 
