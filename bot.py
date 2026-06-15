@@ -1,16 +1,17 @@
 # python bot.py
 import asyncio
 import logging
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from core.config import BOT_TOKEN, MIN_RETIRED_FOR_WEAVING
-from core.persistence import mark_slot_fired
-from core.scheduler import MELBOURNE_TZ, get_schedule_state, wire_new_user, wire_scheduler
+from core.persistence import mark_slot_fired, save_schedule
+from core.scheduler import MELBOURNE_TZ, generate_daily_timestamps, get_schedule_state, wire_new_user, wire_scheduler
 from core.suggest import format_sentence_words, generate_sentence
-from core.vocab import get_active_topic, get_cached_sentence, get_pooled_sentence, get_retired_words, get_topic_description, get_word, init_db, is_registered, list_topics, pick_n_words, pick_word, record_feedback, register_user, set_active_topic, store_cached_sentence, store_pooled_sentence
+from core.vocab import get_active_topic, get_cached_sentence, get_pooled_sentence, get_retired_words, get_topic_description, get_user_schedule_settings, get_word, init_db, is_registered, list_topics, pick_n_words, pick_word, record_feedback, register_user, set_active_topic, set_user_schedule_settings, store_cached_sentence, store_pooled_sentence
 
 
 async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -77,6 +78,7 @@ async def start_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
         "Commands:\n"
         "/schedule — see today's prompt times and which have already fired\n"
         "/topic — browse and switch your active vocabulary topic\n"
+        "/settings — adjust your notification window and daily count\n"
         "/test — send a random card right now. Type /test <word_id> to test a specific word.",
         parse_mode=None,
     )
@@ -382,6 +384,190 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 
+def _fmt_hour(h: int) -> str:
+    if h == 0:
+        return "12am"
+    if h < 12:
+        return f"{h}am"
+    if h == 12:
+        return "12pm"
+    return f"{h - 12}pm"
+
+
+def _build_settings_keyboard(chat_id: int, start: int, end: int, count: int) -> InlineKeyboardMarkup:
+    def adj(field: str, delta: int) -> str:
+        return f"settings_adj:{chat_id}:{start}:{end}:{count}:{field}:{delta}"
+
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⏰ Start", callback_data="settings_noop"),
+            InlineKeyboardButton("−", callback_data=adj("start", -1)),
+            InlineKeyboardButton(_fmt_hour(start), callback_data="settings_noop"),
+            InlineKeyboardButton("+", callback_data=adj("start", 1)),
+        ],
+        [
+            InlineKeyboardButton("⏰ End", callback_data="settings_noop"),
+            InlineKeyboardButton("−", callback_data=adj("end", -1)),
+            InlineKeyboardButton(_fmt_hour(end), callback_data="settings_noop"),
+            InlineKeyboardButton("+", callback_data=adj("end", 1)),
+        ],
+        [
+            InlineKeyboardButton("🔢 Count", callback_data="settings_noop"),
+            InlineKeyboardButton("−", callback_data=adj("count", -1)),
+            InlineKeyboardButton(str(count), callback_data="settings_noop"),
+            InlineKeyboardButton("+", callback_data=adj("count", 1)),
+        ],
+        [
+            InlineKeyboardButton("✓ Save", callback_data=f"settings_save:{chat_id}:{start}:{end}:{count}"),
+        ],
+    ])
+
+
+def _reschedule_user_today(app, chat_id: int, start: int, end: int, count: int) -> None:
+    now = datetime.now(tz=MELBOURNE_TZ)
+
+    # Snapshot fired before canceling jobs so any in-flight job that fires
+    # concurrently doesn't mutate the local set we're working with.
+    fired = app.bot_data.get("today_fired", {}).get(chat_id, set()).copy()
+
+    prefix = f"card_{chat_id}_"
+    for job in app.job_queue.jobs():
+        if job.name and job.name.startswith(prefix):
+            job.schedule_removal()
+
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    window_end_dt   = day_start + timedelta(hours=end)
+    window_start_dt = day_start + timedelta(hours=start)
+    effective_start = max(now, window_start_dt)
+
+    if effective_start >= window_end_dt:
+        app.bot_data.setdefault("today_slots", {})[chat_id] = sorted(fired)
+        app.bot_data.setdefault("today_fired", {})[chat_id] = fired
+        save_schedule(chat_id, sorted(fired), fired)
+        return
+
+    remaining_start_sec = int((effective_start - day_start).total_seconds())
+    window_end_sec      = end * 3600
+    remaining_seconds   = window_end_sec - remaining_start_sec
+    full_window_seconds = (end - start) * 3600
+
+    scaled_count = max(1, round(count * remaining_seconds / full_window_seconds))
+    scaled_count = min(scaled_count, remaining_seconds)
+
+    if scaled_count == 0:
+        all_slots = sorted(fired)
+        save_schedule(chat_id, all_slots, fired)
+        app.bot_data.setdefault("today_slots", {})[chat_id] = all_slots
+        app.bot_data.setdefault("today_fired", {})[chat_id] = fired
+        return
+
+    # Stratified sampling over the remaining window.
+    bucket_size = remaining_seconds / scaled_count
+    offsets = []
+    for i in range(scaled_count):
+        b_start = int(remaining_start_sec + i * bucket_size)
+        b_end   = int(remaining_start_sec + (i + 1) * bucket_size)
+        offsets.append(random.randint(b_start, b_end - 1) if b_end > b_start else b_start)
+    offsets.sort()
+    new_slots = [day_start + timedelta(seconds=s) for s in offsets]
+
+    all_slots = sorted(set(new_slots) | fired)
+    save_schedule(chat_id, all_slots, fired)
+    app.bot_data.setdefault("today_slots", {})[chat_id] = all_slots
+    app.bot_data.setdefault("today_fired", {})[chat_id] = fired
+
+    send_card_fn = app.bot_data["send_card_fn"]
+    for ts in new_slots:
+        if ts > now and ts not in fired:
+            app.job_queue.run_once(
+                send_card_fn,
+                when=ts,
+                chat_id=chat_id,
+                name=f"card_{chat_id}_{ts.isoformat()}",
+                data=ts,
+            )
+
+
+async def settings_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if not is_registered(chat_id):
+        return
+    start, end, count = get_user_schedule_settings(chat_id)
+    await update.message.reply_text(
+        "Adjust your daily schedule:",
+        reply_markup=_build_settings_keyboard(chat_id, start, end, count),
+    )
+
+
+async def settings_adj_handler(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    parts = query.data.split(":")
+    if len(parts) != 7:
+        await query.answer()
+        return
+    _, chat_id_str, start_s, end_s, count_s, field, delta_s = parts
+    try:
+        chat_id = int(chat_id_str)
+        start   = int(start_s)
+        end     = int(end_s)
+        count   = int(count_s)
+        delta   = int(delta_s)
+    except ValueError:
+        await query.answer()
+        return
+
+    if not is_registered(chat_id) or update.effective_chat.id != chat_id:
+        await query.answer()
+        return
+
+    if field == "start":
+        start = max(0, min(22, start + delta))
+        if end <= start:
+            end = start + 1
+    elif field == "end":
+        end = max(1, min(23, end + delta))
+        if end <= start:
+            start = end - 1
+    elif field == "count":
+        count = max(1, min(20, count + delta))
+
+    await query.answer()
+    await query.edit_message_reply_markup(
+        reply_markup=_build_settings_keyboard(chat_id, start, end, count)
+    )
+
+
+async def settings_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    parts = query.data.split(":")
+    if len(parts) != 5:
+        await query.answer()
+        return
+    _, chat_id_str, start_s, end_s, count_s = parts
+    try:
+        chat_id = int(chat_id_str)
+        start   = int(start_s)
+        end     = int(end_s)
+        count   = int(count_s)
+    except ValueError:
+        await query.answer()
+        return
+
+    if not is_registered(chat_id) or update.effective_chat.id != chat_id:
+        await query.answer()
+        return
+
+    set_user_schedule_settings(chat_id, start, end, count)
+    _reschedule_user_today(context.application, chat_id, start, end, count)
+
+    await query.answer("Settings saved!")
+    await query.edit_message_reply_markup(reply_markup=None)
+
+
+async def settings_noop_handler(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.callback_query.answer()
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -414,6 +600,16 @@ def main() -> None:
     )
     app.add_handler(
         CallbackQueryHandler(feedback_handler, pattern=r"^(known|forgot):\d+:[^:]+:.+$")
+    )
+    app.add_handler(CommandHandler("settings", settings_command))
+    app.add_handler(
+        CallbackQueryHandler(settings_adj_handler,  pattern=r"^settings_adj:-?\d+:\d+:\d+:\d+:(start|end|count):-?1$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(settings_save_handler, pattern=r"^settings_save:-?\d+:\d+:\d+:\d+$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(settings_noop_handler, pattern=r"^settings_noop$")
     )
     app.run_polling(drop_pending_updates=True)
 

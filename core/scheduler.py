@@ -6,35 +6,53 @@ from zoneinfo import ZoneInfo
 
 from core.config import DAILY_SLOTS, MIN_RETIRED_FOR_WEAVING, WINDOW_END_HOUR, WINDOW_START_HOUR
 from core.persistence import load_today_schedule, save_schedule
-from core.vocab import get_allowed_chat_ids
+from core.vocab import get_allowed_chat_ids, get_user_schedule_settings
 
 log = logging.getLogger(__name__)
 
 MELBOURNE_TZ = ZoneInfo("Australia/Melbourne")
 
 
-def generate_daily_timestamps(reference_date: datetime | None = None) -> list[datetime]:
+def generate_daily_timestamps(
+    reference_date: datetime | None = None,
+    *,
+    start_hour: int | None = None,
+    end_hour: int | None = None,
+    daily_slots: int | None = None,
+) -> list[datetime]:
     """
-    Return DAILY_SLOTS unique datetimes spread across [WINDOW_START_HOUR, WINDOW_END_HOUR)
-    on the same calendar day as reference_date (defaults to today in Melbourne time).
+    Return daily_slots datetimes spread across [start_hour, end_hour) on the same
+    calendar day as reference_date (defaults to today in Melbourne time).
 
+    Uses stratified sampling: divides the window into daily_slots equal buckets and
+    picks one random second within each, guaranteeing even distribution.
     Timestamps are sorted ascending so notifications arrive in a natural order.
     """
     if reference_date is None:
         reference_date = datetime.now(tz=MELBOURNE_TZ)
 
+    _start = start_hour  if start_hour  is not None else WINDOW_START_HOUR
+    _end   = end_hour    if end_hour    is not None else WINDOW_END_HOUR
+    _slots = daily_slots if daily_slots is not None else DAILY_SLOTS
+
     day_start = reference_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    window_open = WINDOW_START_HOUR * 3600   # seconds since midnight
-    window_close = WINDOW_END_HOUR * 3600
-
+    window_open  = _start * 3600
+    window_close = _end   * 3600
     window_seconds = window_close - window_open
-    if DAILY_SLOTS > window_seconds:
+
+    if _slots > window_seconds:
         raise ValueError(
-            f"DAILY_SLOTS ({DAILY_SLOTS}) exceeds available window seconds ({window_seconds}). "
-            "Reduce DAILY_SLOTS or widen WINDOW_START/END_HOUR in config."
+            f"daily_slots ({_slots}) exceeds available window seconds ({window_seconds}). "
+            "Reduce daily_slots or widen the window."
         )
-    offsets = random.sample(range(window_open, window_close), DAILY_SLOTS)
+
+    bucket_size = window_seconds / _slots
+    offsets = []
+    for i in range(_slots):
+        b_start = int(window_open + i * bucket_size)
+        b_end   = int(window_open + (i + 1) * bucket_size)
+        offsets.append(random.randint(b_start, b_end - 1) if b_end > b_start else b_start)
     offsets.sort()
 
     return [day_start + timedelta(seconds=s) for s in offsets]
@@ -105,10 +123,10 @@ async def _prefill_sentence_cache() -> None:
             log.debug("cached '%s': %.60s", word["word"], sentence)
 
     tasks = []
-    target = DAILY_SLOTS * 2
     allowed = get_allowed_chat_ids()
     for chat_id in allowed:
-        for word in pick_n_words(chat_id, target):
+        _, _, user_slots = get_user_schedule_settings(chat_id)
+        for word in pick_n_words(chat_id, user_slots * 2):
             description = get_topic_description(word["topic"])
             retired = get_retired_words(chat_id, word["topic"])
             highlight_retired = retired if len(retired) >= MIN_RETIRED_FOR_WEAVING else []
@@ -126,7 +144,8 @@ async def _midnight_callback(context) -> None:
     send_card_fn = context.application.bot_data["send_card_fn"]
     now = datetime.now(tz=MELBOURNE_TZ)
     for chat_id in get_allowed_chat_ids():
-        slots = generate_daily_timestamps(now)
+        start, end, count = get_user_schedule_settings(chat_id)
+        slots = generate_daily_timestamps(now, start_hour=start, end_hour=end, daily_slots=count)
         fired: set[datetime] = set()
         save_schedule(chat_id, slots, fired)
         _schedule_user_day(context.application, send_card_fn, chat_id, slots, fired)
@@ -136,7 +155,8 @@ async def _midnight_callback(context) -> None:
 def wire_new_user(app, send_card_fn, chat_id: int) -> None:
     """Generate and register today's schedule for a newly registered user."""
     now = datetime.now(tz=MELBOURNE_TZ)
-    slots = generate_daily_timestamps(now)
+    start, end, count = get_user_schedule_settings(chat_id)
+    slots = generate_daily_timestamps(now, start_hour=start, end_hour=end, daily_slots=count)
     fired: set[datetime] = set()
     save_schedule(chat_id, slots, fired)
     _schedule_user_day(app, send_card_fn, chat_id, slots, fired)
@@ -151,7 +171,8 @@ def wire_scheduler(app, send_card_fn) -> None:
     for chat_id in get_allowed_chat_ids():
         slots, fired = load_today_schedule(chat_id)
         if slots is None:
-            slots = generate_daily_timestamps(now)
+            start, end, count = get_user_schedule_settings(chat_id)
+            slots = generate_daily_timestamps(now, start_hour=start, end_hour=end, daily_slots=count)
             fired = set()
             save_schedule(chat_id, slots, fired)
         _schedule_user_day(app, send_card_fn, chat_id, slots, fired)

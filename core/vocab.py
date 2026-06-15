@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
-from core.config import ALLOWED_CHAT_IDS, DATA_DIR, DB_PATH, INVITE_CODE, NEVER_SEEN_SECONDS, RETIREMENT_THRESHOLD
+from core.config import ALLOWED_CHAT_IDS, DAILY_SLOTS, DATA_DIR, DB_PATH, INVITE_CODE, NEVER_SEEN_SECONDS, RETIREMENT_THRESHOLD, WINDOW_END_HOUR, WINDOW_START_HOUR
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -67,8 +67,11 @@ def init_db() -> None:
                 ON history (chat_id, topic, word_id);
 
             CREATE TABLE IF NOT EXISTS user_settings (
-                chat_id      INTEGER PRIMARY KEY,
-                active_topic TEXT    NOT NULL
+                chat_id           INTEGER PRIMARY KEY,
+                active_topic      TEXT    NOT NULL,
+                window_start_hour INTEGER,
+                window_end_hour   INTEGER,
+                daily_slots       INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS schedule (
@@ -178,6 +181,14 @@ def init_db() -> None:
             if "frequency_rank" not in corpus_cols:
                 conn.execute("ALTER TABLE corpus ADD COLUMN frequency_rank INTEGER")
                 conn.commit()
+
+        # Add per-user schedule settings to user_settings (one-time migration).
+        if "user_settings" in tables:
+            us_cols = {r[1] for r in conn.execute("PRAGMA table_info(user_settings)")}
+            for col in ("window_start_hour", "window_end_hour", "daily_slots"):
+                if col not in us_cols:
+                    conn.execute(f"ALTER TABLE user_settings ADD COLUMN {col} INTEGER")
+            conn.commit()
     finally:
         conn.close()
 
@@ -198,9 +209,54 @@ def set_active_topic(chat_id: int, topic: str) -> None:
     conn = _get_conn()
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO user_settings (chat_id, active_topic) VALUES (?, ?)",
+            "INSERT INTO user_settings (chat_id, active_topic) VALUES (?, ?)"
+            " ON CONFLICT(chat_id) DO UPDATE SET active_topic = excluded.active_topic",
             (chat_id, topic),
         )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_user_schedule_settings(chat_id: int) -> tuple[int, int, int]:
+    """Return (start_hour, end_hour, daily_slots) for this user, falling back to config defaults for any NULL."""
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT window_start_hour, window_end_hour, daily_slots FROM user_settings WHERE chat_id = ?",
+            (chat_id,),
+        ).fetchone()
+        if row is None:
+            return (WINDOW_START_HOUR, WINDOW_END_HOUR, DAILY_SLOTS)
+        start = row["window_start_hour"] if row["window_start_hour"] is not None else WINDOW_START_HOUR
+        end   = row["window_end_hour"]   if row["window_end_hour"]   is not None else WINDOW_END_HOUR
+        count = row["daily_slots"]       if row["daily_slots"]       is not None else DAILY_SLOTS
+        return (start, end, count)
+    finally:
+        conn.close()
+
+
+def set_user_schedule_settings(chat_id: int, start: int, end: int, count: int) -> None:
+    conn = _get_conn()
+    try:
+        existing = conn.execute(
+            "SELECT active_topic FROM user_settings WHERE chat_id = ?", (chat_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE user_settings "
+                "SET window_start_hour = ?, window_end_hour = ?, daily_slots = ? "
+                "WHERE chat_id = ?",
+                (start, end, count, chat_id),
+            )
+        else:
+            # No user_settings row means the user hasn't picked a topic yet.
+            # This shouldn't occur in normal flow (settings require prior registration),
+            # so skip the INSERT rather than planting a fake active_topic.
+            log.warning(
+                "set_user_schedule_settings: no user_settings row for chat_id=%s — settings not persisted",
+                chat_id,
+            )
         conn.commit()
     finally:
         conn.close()
