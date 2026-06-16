@@ -14,7 +14,7 @@ TOPIK-approximate level bands:
   korean_topik_6 : ranks 3001+   (advanced)
 
 word_id: k_{rank:04d} — unique, ASCII, fits within callback limit.
-hint:    English gloss from the source list.
+definition: English gloss from the source list.
 
 Usage:
     python scripts/corpora/import_korean.py
@@ -92,8 +92,8 @@ def main() -> None:
         if not validate_word_id(topic, word_id):
             print(f"  SKIP (callback overflow): rank={rank}")
             continue
-        hint = english if english else None
-        topic_rows[topic].append((topic, word_id, korean, hint, rank))
+        definition = english if english else None
+        topic_rows[topic].append((topic, word_id, korean, definition, rank, None))
 
     try:
         total_inserted = total_skipped = 0

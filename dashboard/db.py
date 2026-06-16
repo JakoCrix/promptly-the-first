@@ -10,7 +10,7 @@ from core.config import DB_PATH, ALLOWED_CHAT_IDS, RETIREMENT_THRESHOLD
 
 EDITABLE_FIELDS = {"word"}
 
-_WORDS_COLUMNS = ["chat_id", "topic", "word_id", "word", "hint", "mastery_score", "last_seen"]
+_WORDS_COLUMNS = ["chat_id", "topic", "word_id", "word", "definition", "mastery_score", "last_seen"]
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -42,7 +42,7 @@ def get_all_words_df() -> pd.DataFrame:
     conn = _get_conn()
     try:
         rows = conn.execute(
-            "SELECT up.chat_id, c.topic, c.word_id, c.word, c.hint, "
+            "SELECT up.chat_id, c.topic, c.word_id, c.word, c.definition, "
             "COALESCE(up.mastery_score, 0) AS mastery_score, up.last_seen "
             "FROM corpus c "
             "LEFT JOIN user_progress up ON c.topic = up.topic AND c.word_id = up.word_id "
@@ -89,12 +89,12 @@ def update_word_entry(chat_id: int, topic: str, word_id: str, word: str) -> int:
         conn.close()
 
 
-def update_word_corpus(topic: str, word_id: str, new_word: str, new_hint: str) -> int:
+def update_word_corpus(topic: str, word_id: str, new_word: str, new_definition: str) -> int:
     conn = _get_conn()
     try:
         cur = conn.execute(
-            "UPDATE corpus SET word = ?, hint = ? WHERE topic = ? AND word_id = ?",
-            (new_word, new_hint, topic, word_id),
+            "UPDATE corpus SET word = ?, definition = ? WHERE topic = ? AND word_id = ?",
+            (new_word, new_definition, topic, word_id),
         )
         conn.commit()
         return cur.rowcount
@@ -117,7 +117,7 @@ def get_words_for_user(chat_id: int, topic: str | None = None) -> pd.DataFrame:
     conn = _get_conn()
     try:
         sql = (
-            "SELECT c.topic, c.word_id, c.word, c.hint, "
+            "SELECT c.topic, c.word_id, c.word, c.definition, "
             "up.mastery_score, up.last_seen "
             "FROM user_progress up "
             "JOIN corpus c ON c.topic = up.topic AND c.word_id = up.word_id "
@@ -129,7 +129,7 @@ def get_words_for_user(chat_id: int, topic: str | None = None) -> pd.DataFrame:
             params.append(topic)
         sql += "ORDER BY c.topic, c.word_id"
         rows = conn.execute(sql, params).fetchall()
-        cols = ["topic", "word_id", "word", "hint", "mastery_score", "last_seen"]
+        cols = ["topic", "word_id", "word", "definition", "mastery_score", "last_seen"]
         return pd.DataFrame([dict(r) for r in rows], columns=cols)
     finally:
         conn.close()

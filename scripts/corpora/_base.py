@@ -26,14 +26,14 @@ def validate_word_id(topic: str, word_id: str) -> bool:
 def bulk_insert(conn, rows: list[tuple], topic: str, description: str) -> tuple[int, int]:
     """INSERT OR IGNORE rows into corpus and seed the topics table.
 
-    Each row must be: (topic, word_id, word, hint, frequency_rank)
+    Each row must be: (topic, word_id, word, definition, frequency_rank, pronunciation)
     Returns (inserted, skipped).
     """
     inserted = skipped = 0
     for row in rows:
         cur = conn.execute(
-            "INSERT OR IGNORE INTO corpus (topic, word_id, word, hint, frequency_rank)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO corpus (topic, word_id, word, definition, frequency_rank, pronunciation)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
             row,
         )
         if cur.rowcount:

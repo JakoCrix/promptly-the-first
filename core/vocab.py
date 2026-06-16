@@ -21,7 +21,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "id":            row["word_id"],
         "topic":         row["topic"],
         "word":          row["word"],
-        "hint":          row["hint"],
+        "definition":    row["definition"],
+        "pronunciation": row["pronunciation"],
         "mastery_score": row["mastery_score"],
         "last_seen":     row["last_seen"],
     }
@@ -35,10 +36,10 @@ def init_db() -> None:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS corpus (
-                topic   TEXT NOT NULL,
-                word_id TEXT NOT NULL,
-                word    TEXT NOT NULL,
-                hint    TEXT,
+                topic      TEXT NOT NULL,
+                word_id    TEXT NOT NULL,
+                word       TEXT NOT NULL,
+                definition TEXT,
                 PRIMARY KEY (topic, word_id)
             );
 
@@ -105,7 +106,8 @@ def init_db() -> None:
                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
                 topic    TEXT NOT NULL,
                 word_id  TEXT NOT NULL,
-                sentence TEXT NOT NULL
+                sentence TEXT NOT NULL,
+                UNIQUE (topic, word_id, sentence)
             );
             CREATE INDEX IF NOT EXISTS idx_word_sentences_lookup
                 ON word_sentences (topic, word_id);
@@ -130,7 +132,7 @@ def init_db() -> None:
                 conn.execute("ALTER TABLE words ADD COLUMN hint TEXT")
                 conn.commit()
             conn.executescript("""
-                INSERT OR IGNORE INTO corpus (topic, word_id, word, hint)
+                INSERT OR IGNORE INTO corpus (topic, word_id, word, definition)
                     SELECT DISTINCT topic, word_id, word, hint FROM words;
                 INSERT OR IGNORE INTO user_progress (chat_id, topic, word_id, mastery_score, last_seen)
                     SELECT chat_id, topic, word_id, mastery_score, last_seen FROM words;
@@ -180,6 +182,34 @@ def init_db() -> None:
             corpus_cols = {r[1] for r in conn.execute("PRAGMA table_info(corpus)")}
             if "frequency_rank" not in corpus_cols:
                 conn.execute("ALTER TABLE corpus ADD COLUMN frequency_rank INTEGER")
+                conn.commit()
+            if "pronunciation" not in corpus_cols:
+                conn.execute("ALTER TABLE corpus ADD COLUMN pronunciation TEXT")
+                conn.commit()
+            if "hint" in corpus_cols and "definition" not in corpus_cols:
+                conn.execute("ALTER TABLE corpus RENAME COLUMN hint TO definition")
+                conn.commit()
+
+        # Add UNIQUE constraint to word_sentences to allow INSERT OR IGNORE dedup.
+        # SQLite can't ADD CONSTRAINT, so rebuild the table if the index is missing.
+        if "word_sentences" in tables:
+            existing_idx = {r[1] for r in conn.execute("PRAGMA index_list(word_sentences)")}
+            if "uq_word_sentences" not in existing_idx:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS word_sentences_new (
+                        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                        topic    TEXT NOT NULL,
+                        word_id  TEXT NOT NULL,
+                        sentence TEXT NOT NULL,
+                        UNIQUE (topic, word_id, sentence)
+                    );
+                    INSERT OR IGNORE INTO word_sentences_new (id, topic, word_id, sentence)
+                        SELECT id, topic, word_id, sentence FROM word_sentences;
+                    DROP TABLE word_sentences;
+                    ALTER TABLE word_sentences_new RENAME TO word_sentences;
+                    CREATE INDEX IF NOT EXISTS idx_word_sentences_lookup
+                        ON word_sentences (topic, word_id);
+                """)
                 conn.commit()
 
         # Add per-user schedule settings to user_settings (one-time migration).
@@ -273,11 +303,42 @@ def list_topics(chat_id: int) -> list[str]:
         conn.close()
 
 
+def find_word(chat_id: int, word_id: str) -> dict | None:
+    """Find a word by word_id, preferring the user's active topic to avoid cross-topic collisions."""
+    conn = _get_conn()
+    try:
+        active_topic = _resolve_topic(conn, chat_id)
+        if active_topic:
+            row = conn.execute(
+                "SELECT c.word_id, c.topic, c.word, c.definition, c.pronunciation, "
+                "COALESCE(up.mastery_score, 0) AS mastery_score, up.last_seen "
+                "FROM corpus c "
+                "LEFT JOIN user_progress up "
+                "    ON c.topic = up.topic AND c.word_id = up.word_id AND up.chat_id = ? "
+                "WHERE c.topic = ? AND c.word_id = ?",
+                (chat_id, active_topic, word_id),
+            ).fetchone()
+            if row:
+                return _row_to_dict(row)
+        row = conn.execute(
+            "SELECT c.word_id, c.topic, c.word, c.definition, c.pronunciation, "
+            "COALESCE(up.mastery_score, 0) AS mastery_score, up.last_seen "
+            "FROM corpus c "
+            "LEFT JOIN user_progress up "
+            "    ON c.topic = up.topic AND c.word_id = up.word_id AND up.chat_id = ? "
+            "WHERE c.word_id = ? LIMIT 1",
+            (chat_id, word_id),
+        ).fetchone()
+        return _row_to_dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def get_word(chat_id: int, topic: str, word_id: str) -> dict | None:
     conn = _get_conn()
     try:
         row = conn.execute(
-            "SELECT c.word_id, c.topic, c.word, c.hint, "
+            "SELECT c.word_id, c.topic, c.word, c.definition, c.pronunciation, "
             "COALESCE(up.mastery_score, 0) AS mastery_score, up.last_seen "
             "FROM corpus c "
             "LEFT JOIN user_progress up "
@@ -322,7 +383,7 @@ def pick_word(chat_id: int) -> dict | None:
             return None
 
         rows = conn.execute(
-            "SELECT c.word_id, c.topic, c.word, c.hint, "
+            "SELECT c.word_id, c.topic, c.word, c.definition, c.pronunciation, "
             "COALESCE(up.mastery_score, 0) AS mastery_score, up.last_seen "
             "FROM corpus c "
             "LEFT JOIN user_progress up "
@@ -351,7 +412,7 @@ def pick_n_words(chat_id: int, n: int) -> list[dict]:
             return []
 
         rows = conn.execute(
-            "SELECT c.word_id, c.topic, c.word, c.hint, "
+            "SELECT c.word_id, c.topic, c.word, c.definition, c.pronunciation, "
             "COALESCE(up.mastery_score, 0) AS mastery_score, up.last_seen "
             "FROM corpus c "
             "LEFT JOIN user_progress up "

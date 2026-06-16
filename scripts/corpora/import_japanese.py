@@ -68,8 +68,9 @@ def _build_row(entry: dict, topic: str, rank: int, seen_ids: set[str]) -> tuple 
         counter += 1
 
     seen_ids.add(word_id)
-    hint = f"{reading} — {meaning}" if reading else meaning
-    return (topic, word_id, word, hint, rank)
+    definition = meaning if meaning else None
+    pronunciation = reading if reading else None
+    return (topic, word_id, word, definition, rank, pronunciation)
 
 
 def main() -> None:

@@ -48,6 +48,13 @@ python scripts/corpora/import_spanish.py            # import Spanish freq list a
 python scripts/sentences/chinese.py                       # generate sentences for all chinese_hsk_* topics
 python scripts/sentences/chinese.py --topic chinese_hsk_1 # limit to one topic
 python scripts/sentences/chinese.py --count 10 --delay 0.5 # sentences per word, API delay in seconds
+
+# Pronunciation builders (scripts/pronunciation/) — resumable, safe to re-run
+# Chinese pronunciation (toned pinyin) is populated by import_chinese.py --confirm (no AI needed)
+python scripts/pronunciation/japanese.py                  # generate Hepburn romaji for all japanese_jlpt_* topics
+python scripts/pronunciation/japanese.py --topic japanese_jlpt_n5 # limit to one topic
+python scripts/pronunciation/korean.py                    # generate Revised Romanization for all korean_topik_* topics
+python scripts/pronunciation/korean.py --topic korean_topik_1     # limit to one topic
 python scripts/sentences/english.py                       # generate sentences for english_* topics
 python scripts/sentences/japanese.py                      # generate sentences for japanese_jlpt_* topics
 python scripts/sentences/korean.py                        # generate sentences for korean_topik_* topics
@@ -78,7 +85,7 @@ No automated tests. All verification is manual via the scripts above.
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `corpus` | Shared word definitions, one row per word | PK: `(topic, word_id)`; columns: `word`, `hint`, `frequency_rank` |
+| `corpus` | Shared word definitions, one row per word | PK: `(topic, word_id)`; columns: `word`, `hint`, `frequency_rank`, `pronunciation` |
 | `user_progress` | Per-user mastery tracking | PK: `(chat_id, topic, word_id)`; FK → corpus; columns: `mastery_score`, `last_seen` |
 | `history` | Every Known/Forgot event | FK → user_progress; `UNIQUE (chat_id, topic, word_id, timestamp, result)` |
 | `user_settings` | Each user's active topic | PK: `chat_id` |
@@ -89,7 +96,7 @@ No automated tests. All verification is manual via the scripts above.
 | `topics` | Per-topic description used as Gemini context | PK: `topic` |
 | `word_pool` | Candidate words staged for review in the dashboard | created by `dashboard/db.py:init_word_pool()` |
 
-The `hint` column on `corpus` stores tone-marked pinyin + first English meaning for HSK words (e.g. `ài hào — to like; to be fond of`); `NULL` for non-HSK words. `init_db()` contains a one-time migration that moves any old `words` table rows into `corpus` and `user_progress`.
+The `hint` column on `corpus` stores the English gloss for HSK/JLPT/Korean words; `NULL` for Spanish and English entries. The `pronunciation` column stores romanization: toned pinyin for Chinese (e.g. `ài hào`), Hepburn romaji for Japanese (e.g. `ane`), Revised Romanization for Korean; `NULL` for Spanish and English. Both columns are shown on vocab cards. `init_db()` contains a one-time migration that moves any old `words` table rows into `corpus` and `user_progress`.
 
 **Word selection (`core/vocab.pick_word`):** Weighted random — `weight = (1 / (mastery_score + 1)) * elapsed_seconds`. Unseen words (no `user_progress` row) get `NEVER_SEEN_SECONDS` (7 days) so they always surface early. Words with `mastery_score >= RETIREMENT_THRESHOLD` (10) are excluded. Topic is resolved from `user_settings`; if no row exists, falls back to the first topic in `corpus` alphabetically. `list_topics(chat_id)` returns all topics present in `corpus` (global — the query does not filter by user).
 

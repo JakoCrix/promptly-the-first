@@ -109,7 +109,7 @@ def _mastery_tab(selected_user: int, selected_topic: str) -> None:
         "topic":         st.column_config.TextColumn("Topic",    disabled=True),
         "word_id":       st.column_config.TextColumn("Word ID",  disabled=True),
         "word":          st.column_config.TextColumn("Word",     disabled=True),
-        "hint":          st.column_config.TextColumn("Hint",     disabled=True),
+        "definition":          st.column_config.TextColumn("Hint",     disabled=True),
         "mastery_score": st.column_config.NumberColumn("Mastery", min_value=0, step=1),
         "last_seen":     st.column_config.TextColumn("Last seen", disabled=True),
         "status":        st.column_config.TextColumn("Status",   disabled=True),
@@ -221,7 +221,7 @@ with tab1:
 # ── Tab 2: Word Editor ─────────────────────────────────────────────────────────
 with tab2:
     st.header("Word Editor")
-    st.caption("Edits apply to the shared corpus — all users will see the updated word and hint.")
+    st.caption("Edits apply to the shared corpus — all users will see the updated word and definition.")
 
     topic_arg2 = None if selected_topic == "All topics" else selected_topic
     editor_df = _load_words(selected_user, topic_arg2)
@@ -239,14 +239,14 @@ with tab2:
 
         with st.form("word_edit_form"):
             new_word = st.text_input("Word text", value=current["word"])
-            new_hint = st.text_input("Hint", value=current["hint"] if pd.notna(current["hint"]) else "")
+            new_definition = st.text_input("Hint", value=current["definition"] if pd.notna(current["definition"]) else "")
             save_btn = st.form_submit_button("Save")
 
         if save_btn:
             if not new_word.strip():
                 st.warning("Word text cannot be empty.")
             else:
-                rowcount = update_word_corpus(ed_topic, ed_word_id, new_word.strip(), new_hint.strip())
+                rowcount = update_word_corpus(ed_topic, ed_word_id, new_word.strip(), new_definition.strip())
                 if rowcount > 0:
                     _load_words.clear()
                     st.toast(f"'{ed_word_id}' updated in corpus")

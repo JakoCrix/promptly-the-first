@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
 
-from core.config import BOT_TOKEN, MIN_RETIRED_FOR_WEAVING
+from core.config import BOT_TOKEN, MIN_RETIRED_FOR_WEAVING, require_bot_token
 from core.persistence import mark_slot_fired, save_schedule
 from core.scheduler import MELBOURNE_TZ, generate_daily_timestamps, get_schedule_state, wire_new_user, wire_scheduler
 from core.suggest import format_sentence_words, generate_sentence
@@ -33,7 +33,7 @@ async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
             try:
                 description = get_topic_description(word["topic"])
                 raw = await asyncio.wait_for(
-                    asyncio.to_thread(generate_sentence, word["word"], word["topic"], description, word.get("hint"), retired),
+                    asyncio.to_thread(generate_sentence, word["word"], word["topic"], description, word.get("definition"), retired, word.get("pronunciation")),
                     timeout=15.0,
                 )
                 if raw:
@@ -45,8 +45,9 @@ async def send_card(context: ContextTypes.DEFAULT_TYPE) -> None:
             except Exception:
                 logging.warning("generate_sentence failed for '%s'", word["word"], exc_info=True)
 
-    hint_line = f"\n<i>{word['hint']}</i>" if word.get("hint") else ""
-    text = f"<b>{word['word']}</b>{hint_line}" + (f"\n\n{sentence}" if sentence else "")
+    pronunciation_line = f"\n<code>{word['pronunciation']}</code>" if word.get("pronunciation") else ""
+    hint_line = f"\n<i>{word['definition']}</i>" if word.get("definition") else ""
+    text = f"<b>{word['word']}</b>{pronunciation_line}{hint_line}" + (f"\n\n{sentence}" if sentence else "")
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['topic']}:{word['id']}"),
         InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['topic']}:{word['id']}"),
@@ -328,7 +329,7 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 try:
                     description = get_topic_description(word["topic"])
                     raw = await asyncio.wait_for(
-                        asyncio.to_thread(generate_sentence, word["word"], word["topic"], description, word.get("hint"), retired),
+                        asyncio.to_thread(generate_sentence, word["word"], word["topic"], description, word.get("definition"), retired, word.get("pronunciation")),
                         timeout=15.0,
                     )
                     if raw:
@@ -340,8 +341,9 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 except Exception:
                     logging.warning("generate_sentence failed for '%s'", word["word"], exc_info=True)
 
-        hint_line = f"\n<i>{word['hint']}</i>" if word.get("hint") else ""
-        text = f"<b>{word['word']}</b>{hint_line}" + (f"\n\n{sentence}" if sentence else "")
+        pronunciation_line = f"\n<code>{word['pronunciation']}</code>" if word.get("pronunciation") else ""
+        hint_line = f"\n<i>{word['definition']}</i>" if word.get("definition") else ""
+        text = f"<b>{word['word']}</b>{pronunciation_line}{hint_line}" + (f"\n\n{sentence}" if sentence else "")
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Known", callback_data=f"known:{chat_id}:{word['topic']}:{word['id']}"),
             InlineKeyboardButton("❌ Forgot", callback_data=f"forgot:{chat_id}:{word['topic']}:{word['id']}"),
@@ -574,13 +576,15 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    token = require_bot_token()
+
     async def post_init(app):
         init_db()
         wire_scheduler(app, send_card)
 
     app = (
         ApplicationBuilder()
-        .token(BOT_TOKEN)
+        .token(token)
         .post_init(post_init)
         .build()
     )

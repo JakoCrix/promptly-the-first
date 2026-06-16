@@ -106,7 +106,7 @@ async def _prefill_sentence_cache() -> None:
             raw = await asyncio.wait_for(
                 asyncio.to_thread(
                     generate_sentence,
-                    word["word"], word["topic"], description, word.get("hint"), retired,
+                    word["word"], word["topic"], description, word.get("definition"), retired,
                 ),
                 timeout=15.0,
             )

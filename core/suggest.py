@@ -15,11 +15,13 @@ def generate_sentence(
     word: str,
     topic: str,
     description: str,
-    hint: str | None = None,
+    definition: str | None = None,
     retired_words: list[str] | None = None,
+    pronunciation: str | None = None,
 ) -> str | None:
     """Generate one fresh sentence for a vocab card. Returns None on any failure."""
-    hint_line = f'Pronunciation and meaning: "{hint}"\n' if hint else ""
+    pronunciation_line = f'Pronunciation: "{pronunciation}"\n' if pronunciation else ""
+    hint_line = f'Meaning: "{definition}"\n' if definition else ""
     retired_line = ""
     if retired_words and len(retired_words) >= MIN_RETIRED_FOR_WEAVING:
         retired_line = (
@@ -31,6 +33,7 @@ def generate_sentence(
     prompt = (
         f'Generate exactly one natural example sentence that uses the word or phrase "{word}" '
         f'in the context of the topic "{topic}".\n'
+        f"{pronunciation_line}"
         f"{hint_line}"
         f"Topic description: {description or topic}\n"
         f"{retired_line}"

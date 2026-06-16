@@ -43,7 +43,7 @@ def _build_row(entry: dict, topic: str, rank: int) -> tuple | None:
         f0 = forms[0] if forms else {}
         transcriptions = f0.get("transcriptions", {})
         pinyin_numeric = transcriptions.get("numeric", "")
-        pinyin_toned = transcriptions.get("toned", "")
+        pinyin_toned = transcriptions.get("pinyin", "")
         meanings = f0.get("meanings", [])
         gloss = meanings[0] if meanings else ""
     except (KeyError, IndexError, TypeError):
@@ -56,15 +56,14 @@ def _build_row(entry: dict, topic: str, rank: int) -> tuple | None:
         print(f"  SKIP (callback overflow): {word!r}  word_id={word_id!r}")
         return None
 
-    hint = None
-    if pinyin_toned and gloss:
-        hint = f"{pinyin_toned} — {gloss}"
-    elif pinyin_toned:
-        hint = pinyin_toned
-    elif gloss:
-        hint = gloss
+    pronunciation = pinyin_toned if pinyin_toned else None
+    definition = gloss if gloss else None
 
-    return (topic, word_id, word, hint, rank)
+    if not pronunciation:
+        print(f"  WARN: no toned pinyin for {word!r} (word_id={word_id!r}), "
+              f"transcription keys: {list(transcriptions.keys())!r}")
+
+    return (topic, word_id, word, definition, rank, pronunciation)
 
 
 def _purge_old_data(conn) -> tuple[int, int]:
