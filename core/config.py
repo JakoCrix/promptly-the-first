@@ -27,5 +27,8 @@ RETIREMENT_THRESHOLD = 10
 # Gives unseen words a high initial weight without special-casing them
 NEVER_SEEN_SECONDS = 7 * 24 * 3600
 
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN is not set — add it to your .env file")
+def require_bot_token() -> str:
+    """Call in bot.py at startup — not at import time, so data scripts work without a token."""
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN is not set — add it to your .env file")
+    return BOT_TOKEN

@@ -58,7 +58,7 @@ def main() -> None:
             print(f"  SKIP (callback overflow): {headword!r}")
             continue
         seen_ids.add(word_id)
-        rows.append((_TOPIC, word_id, headword, None, rank))
+        rows.append((_TOPIC, word_id, headword, None, rank, None))
 
     try:
         inserted, skipped = bulk_insert(conn, rows, _TOPIC, _DESCRIPTION)

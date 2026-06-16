@@ -17,8 +17,8 @@ CEFR-approximate level bands (filtered-rank after function word removal):
   spanish_pcic_c2 : filtered ranks 9001+
 
 word_id: es_{rank:05d} — unique ASCII key (Spanish has accented chars that slugify drops).
-hint:    None — Spanish uses Latin script; the Gemini sentence provides context.
-         Add English glosses via a later migration once a suitable open source is found.
+definition: None — Spanish uses Latin script; the Gemini sentence provides context.
+            Add English glosses via a later migration once a suitable open source is found.
 
 Usage:
     python scripts/corpora/import_spanish.py
@@ -101,7 +101,7 @@ def main() -> None:
             print(f"  SKIP (callback overflow): rank={filtered_rank}")
             continue
 
-        topic_rows[topic].append((topic, word_id, word, None, filtered_rank))
+        topic_rows[topic].append((topic, word_id, word, None, filtered_rank, None))
 
     try:
         total_inserted = total_skipped = 0
@@ -118,7 +118,7 @@ def main() -> None:
         conn.close()
 
     print(f"\nTotal: {total_inserted} inserted, {total_skipped} skipped.")
-    print("Note: hint=NULL for all Spanish entries. Add English glosses via a migration")
+    print("Note: definition=NULL for all Spanish entries. Add English glosses via a migration")
     print("once a suitable open-licensed Spanish-English word list is sourced.")
 
 

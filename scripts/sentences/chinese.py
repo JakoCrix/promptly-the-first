@@ -31,7 +31,7 @@ from core.config import GEMINI_MODEL, GOOGLE_API_KEY
 from core.vocab import _get_conn, init_db
 
 OUTPUT_CSV = os.path.join(PROJECT_ROOT, "data", "word_sentences", "chinese.csv")
-CSV_FIELDNAMES = ["topic", "word_id", "word", "hint", "sentence"]
+CSV_FIELDNAMES = ["topic", "word_id", "word", "definition", "sentence"]
 
 genai.configure(api_key=GOOGLE_API_KEY)
 _MODEL = genai.GenerativeModel(GEMINI_MODEL)
@@ -56,13 +56,13 @@ def _fetch_words(topic_filter: str | None) -> list[dict]:
     try:
         if topic_filter:
             rows = conn.execute(
-                "SELECT topic, word_id, word, hint FROM corpus "
+                "SELECT topic, word_id, word, definition FROM corpus "
                 "WHERE topic = ? ORDER BY frequency_rank",
                 (topic_filter,),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT topic, word_id, word, hint FROM corpus "
+                "SELECT topic, word_id, word, definition FROM corpus "
                 "WHERE topic LIKE 'chinese_hsk_%' ORDER BY topic, frequency_rank",
             ).fetchall()
         return [dict(r) for r in rows]
@@ -70,11 +70,11 @@ def _fetch_words(topic_filter: str | None) -> list[dict]:
         conn.close()
 
 
-def _generate_sentences(word: str, hint: str | None, count: int) -> list[str]:
-    hint_line = f'Pronunciation and meaning: "{hint}"\n' if hint else ""
+def _generate_sentences(word: str, definition: str | None, count: int) -> list[str]:
+    definition_line = f'Pronunciation and meaning: "{definition}"\n' if definition else ""
     prompt = (
         f'Generate exactly {count} natural example sentences using the Chinese word or phrase "{word}".\n'
-        f"{hint_line}"
+        f"{definition_line}"
         f"Each sentence should be distinct and useful for a Mandarin learner.\n"
         f"Number them 1–{count}, one per line. Return only the sentences — no extra labels, no quotes, no blank lines."
     )
@@ -105,7 +105,7 @@ def _store(word: dict, sentences: list[str], csv_writer, csv_file) -> None:
                 "topic":    word["topic"],
                 "word_id":  word["word_id"],
                 "word":     word["word"],
-                "hint":     word.get("hint") or "",
+                "definition":     word.get("definition") or "",
                 "sentence": sentence,
             })
         conn.commit()
@@ -146,7 +146,7 @@ def main() -> None:
 
         for i, word in enumerate(to_process, 1):
             print(f"[{i}/{len(to_process)}] {word['topic']} / {word['word_id']} ({word['word']}) ...", end=" ", flush=True)
-            sentences = _generate_sentences(word["word"], word.get("hint"), args.count)
+            sentences = _generate_sentences(word["word"], word.get("definition"), args.count)
             if not sentences:
                 print("SKIPPED (no output)")
                 errors += 1
