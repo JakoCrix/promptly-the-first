@@ -106,7 +106,8 @@ def init_db() -> None:
                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
                 topic    TEXT NOT NULL,
                 word_id  TEXT NOT NULL,
-                sentence TEXT NOT NULL
+                sentence TEXT NOT NULL,
+                UNIQUE (topic, word_id, sentence)
             );
             CREATE INDEX IF NOT EXISTS idx_word_sentences_lookup
                 ON word_sentences (topic, word_id);
@@ -187,6 +188,28 @@ def init_db() -> None:
                 conn.commit()
             if "hint" in corpus_cols and "definition" not in corpus_cols:
                 conn.execute("ALTER TABLE corpus RENAME COLUMN hint TO definition")
+                conn.commit()
+
+        # Add UNIQUE constraint to word_sentences to allow INSERT OR IGNORE dedup.
+        # SQLite can't ADD CONSTRAINT, so rebuild the table if the index is missing.
+        if "word_sentences" in tables:
+            existing_idx = {r[1] for r in conn.execute("PRAGMA index_list(word_sentences)")}
+            if "uq_word_sentences" not in existing_idx:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS word_sentences_new (
+                        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                        topic    TEXT NOT NULL,
+                        word_id  TEXT NOT NULL,
+                        sentence TEXT NOT NULL,
+                        UNIQUE (topic, word_id, sentence)
+                    );
+                    INSERT OR IGNORE INTO word_sentences_new (id, topic, word_id, sentence)
+                        SELECT id, topic, word_id, sentence FROM word_sentences;
+                    DROP TABLE word_sentences;
+                    ALTER TABLE word_sentences_new RENAME TO word_sentences;
+                    CREATE INDEX IF NOT EXISTS idx_word_sentences_lookup
+                        ON word_sentences (topic, word_id);
+                """)
                 conn.commit()
 
         # Add per-user schedule settings to user_settings (one-time migration).
